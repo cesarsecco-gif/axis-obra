@@ -1342,5 +1342,20 @@ if (fs.existsSync(frontendDist)) {
 }
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`AXIS OBRA Backend rodando em http://0.0.0.0:${PORT}`);
+  console.log(`AXIS OBRA Backend rodando na porta principal http://0.0.0.0:${PORT}`);
 });
+
+// Em ambiente Docker/Coolify (produção), escutar também nas portas 80 e 3000
+// para evitar erro "no available server" caso o Traefik/Coolify esteja apontando para a porta padrão 80 ou 3000
+if (process.env.NODE_ENV === 'production') {
+  [80, 3000].forEach((extraPort) => {
+    if (Number(PORT) !== extraPort) {
+      const extraServer = app.listen(extraPort, '0.0.0.0', () => {
+        console.log(`AXIS OBRA Backend escutando também na porta http://0.0.0.0:${extraPort}`);
+      });
+      extraServer.on('error', () => {
+        // Ignora caso a porta extra não esteja disponível no host
+      });
+    }
+  });
+}
