@@ -1,0 +1,44 @@
+name: Build & Deploy AXIS OBRA na VPS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-check:
+    name: Validar Build do Projeto
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js 22+
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Instalar dependências e testar build do Frontend
+        run: |
+          npm --prefix backend install
+          npm --prefix frontend install
+          npm --prefix frontend run build
+
+  deploy-vps:
+    name: Atualizar VPS via SSH
+    needs: build-check
+    runs-on: ubuntu-latest
+    # Só executa o deploy SSH se o segredo VPS_HOST estiver configurado no repositório
+    if: ${{ secrets.VPS_HOST != '' }}
+    steps:
+      - name: Executar deploy remoto na VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script: |
+            cd ${{ secrets.VPS_APP_DIR || '/var/www/axis-obra' }}
+            chmod +x deploy.sh
+            ./deploy.sh

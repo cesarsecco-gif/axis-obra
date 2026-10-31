@@ -1,0 +1,16 @@
+{
+  "name": "axis-obra-backend",
+  "version": "1.0.0",
+  "description": "Backend API REST para o Sistema de Gerenciamento de Obras AXIS OBRA",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "multer": "^1.4.5-lts.1"
+  }
+}
+

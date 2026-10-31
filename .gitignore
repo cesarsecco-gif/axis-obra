@@ -1,0 +1,21 @@
+# Dependências
+node_modules/
+backend/node_modules/
+frontend/node_modules/
+
+# Build do Frontend (gerado no deploy)
+frontend/dist/
+
+# Banco de dados SQLite e fotos enviadas em produção (NUNCA versionar para não sobrescrever dados da VPS)
+backend/data/*.db
+backend/data/*.db-wal
+backend/data/*.db-shm
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# Variáveis de ambiente e logs
+.env
+.env.*
+*.log
+npm-debug.log*
+
