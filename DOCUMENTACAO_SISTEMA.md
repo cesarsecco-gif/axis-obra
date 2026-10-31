@@ -118,10 +118,14 @@ O sistema implementa controle de acesso baseado em função (*Role-Based Access 
 
 ### 5.2. Módulo 2 — Registro de Ocorrências
 - **Finalidade**: Registrar fatos relevantes, acidentes/incidentes, atrasos de fornecedores, falhas de equipamentos e não conformidades.
+- **Gerenciador de Campos Personalizáveis**:
+  - Possui uma aba dedicada (**⚙️ Gerenciar Campos**) onde o usuário pode cadastrar, editar (nome e cor da etiqueta) ou excluir opções para os 4 parâmetros estruturais:
+    1. **Categoria / Tipo** (`TYPE`)
+    2. **Grau de Severidade** (`SEVERITY`)
+    3. **Status** (`STATUS`)
+    4. **Setor / Frente de Serviço** (`SECTOR`)
 - **Funcionalidades**:
-  - Categorização por tipo: *Segurança, Atraso de Material, Falha de Equipamento, Qualidade, Clima, Projeto (RFI), Fiscalização, Efetivo* e *Outros*.
-  - Classificação por grau de severidade: `BAIXA`, `MEDIA`, `ALTA` e `CRITICA`.
-  - Fluxo de status: `ABERTA` → `EM_ANDAMENTO` (Em Tratamento) → `RESOLVIDA`.
+  - Categorização dinâmica por tipo, grau de severidade, status e setor/frente de serviço.
   - Registro obrigatório da descrição do fato e campo específico para **Providências Adotadas / Plano de Ação**.
   - Botões rápidos na listagem para avançar o status da ocorrência em 1 clique.
 
@@ -232,3 +236,4 @@ Na primeira inicialização do banco de dados, o sistema cria automaticamente 4 
 | **Eng. Mariana Costa** | `mariana@axisobra.com.br` | `ENGENHEIRO` | `OBR-2026-001` (Horizon) e `OBR-2026-003` (Clínica) |
 | **Eng. Roberto Almeida** | `roberto@axisobra.com.br` | `ENGENHEIRO` | `OBR-2026-002` (Centro Logístico Campinas) |
 | **João Batista Silva** | `joao@axisobra.com.br` | `ENCARREGADO` | `OBR-2026-001` (Residencial Horizon Towers) |
+

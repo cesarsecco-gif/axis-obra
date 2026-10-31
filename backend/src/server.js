@@ -1064,8 +1064,121 @@ app.delete('/api/photos/:id', authenticate, (req, res) => {
 });
 
 // ============================================================================
-// 6. REGISTRO DE OCORRÊNCIAS (MÓDULO 2)
+// 6. REGISTRO DE OCORRÊNCIAS E GERENCIAMENTO DE CAMPOS (MÓDULO 2)
 // ============================================================================
+
+app.get('/api/occurrence-params', authenticate, (req, res) => {
+  const { group } = req.query;
+  let rows;
+  if (group) {
+    rows = db
+      .prepare('SELECT * FROM occurrence_params WHERE group_key = ? ORDER BY sort_order ASC, id ASC')
+      .all(group.toUpperCase());
+  } else {
+    rows = db
+      .prepare('SELECT * FROM occurrence_params ORDER BY group_key ASC, sort_order ASC, id ASC')
+      .all();
+  }
+  res.json(rows);
+});
+
+app.post('/api/occurrence-params', authenticate, (req, res) => {
+  const { group_key, code, label, color, is_resolved, is_critical, sort_order } = req.body;
+  if (!group_key || !label || !label.trim()) {
+    return res.status(400).json({ error: 'Grupo e nome da opção são obrigatórios.' });
+  }
+
+  const validGroups = ['TYPE', 'SEVERITY', 'STATUS', 'SECTOR'];
+  const normalizedGroup = String(group_key).toUpperCase();
+  if (!validGroups.includes(normalizedGroup)) {
+    return res.status(400).json({ error: 'Grupo inválido.' });
+  }
+
+  const normalizedCode = (
+    code && code.trim()
+      ? code.trim()
+      : label
+          .trim()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/[^a-zA-Z0-9]+/g, '_')
+          .replace(/^_+|_+$/g, '')
+  ).toUpperCase();
+
+  // Para SECTOR, usamos o próprio label como valor caso o usuário prefira leitura direta, ou code padronizado
+  const finalCode = normalizedGroup === 'SECTOR' ? label.trim() : normalizedCode;
+
+  const info = db
+    .prepare(`
+      INSERT INTO occurrence_params (group_key, code, label, color, is_resolved, is_critical, sort_order)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `)
+    .run(
+      normalizedGroup,
+      finalCode,
+      label.trim(),
+      color || 'slate',
+      is_resolved ? 1 : 0,
+      is_critical ? 1 : 0,
+      Number(sort_order) || 10
+    );
+
+  const created = db
+    .prepare('SELECT * FROM occurrence_params WHERE id = ?')
+    .get(Number(info.lastInsertRowid));
+  res.status(201).json(created);
+});
+
+app.put('/api/occurrence-params/:id', authenticate, (req, res) => {
+  const paramId = Number(req.params.id);
+  const existing = db.prepare('SELECT * FROM occurrence_params WHERE id = ?').get(paramId);
+  if (!existing) {
+    return res.status(404).json({ error: 'Item de configuração não encontrado.' });
+  }
+
+  const { label, color, is_resolved, is_critical, sort_order } = req.body;
+  if (!label || !label.trim()) {
+    return res.status(400).json({ error: 'O nome da opção não pode ficar vazio.' });
+  }
+
+  const updatedCode = existing.group_key === 'SECTOR' ? label.trim() : existing.code;
+
+  db.prepare(`
+    UPDATE occurrence_params
+    SET code = ?, label = ?, color = ?, is_resolved = ?, is_critical = ?, sort_order = ?
+    WHERE id = ?
+  `).run(
+    updatedCode,
+    label.trim(),
+    color || existing.color,
+    is_resolved !== undefined ? (is_resolved ? 1 : 0) : existing.is_resolved,
+    is_critical !== undefined ? (is_critical ? 1 : 0) : existing.is_critical,
+    sort_order !== undefined ? Number(sort_order) : existing.sort_order,
+    paramId
+  );
+
+  // Se for um setor cujo nome mudou, atualiza também nas ocorrências existentes para manter consistência
+  if (existing.group_key === 'SECTOR' && existing.label !== label.trim()) {
+    db.prepare('UPDATE occurrences SET location_area = ? WHERE location_area = ?').run(
+      label.trim(),
+      existing.label
+    );
+  }
+
+  const updated = db.prepare('SELECT * FROM occurrence_params WHERE id = ?').get(paramId);
+  res.json(updated);
+});
+
+app.delete('/api/occurrence-params/:id', authenticate, (req, res) => {
+  const paramId = Number(req.params.id);
+  const existing = db.prepare('SELECT * FROM occurrence_params WHERE id = ?').get(paramId);
+  if (!existing) {
+    return res.status(404).json({ error: 'Item não encontrado.' });
+  }
+
+  db.prepare('DELETE FROM occurrence_params WHERE id = ?').run(paramId);
+  res.json({ success: true });
+});
 
 app.get('/api/occurrences', authenticate, (req, res) => {
   const { projectId, status, severity } = req.query;

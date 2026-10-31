@@ -158,9 +158,22 @@ function initDatabase() {
       FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
     );
+
+    CREATE TABLE IF NOT EXISTS occurrence_params (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_key TEXT NOT NULL,
+      code TEXT NOT NULL,
+      label TEXT NOT NULL,
+      color TEXT DEFAULT 'slate',
+      is_resolved INTEGER DEFAULT 0,
+      is_critical INTEGER DEFAULT 0,
+      sort_order INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
   `);
 
   ensureSamplePhotos();
+  seedOccurrenceParamsIfEmpty();
   seedIfEmpty();
 }
 
@@ -267,6 +280,62 @@ function ensureSamplePhotos() {
     '#1e293b',
     '#22d3ee'
   );
+}
+
+function seedOccurrenceParamsIfEmpty() {
+  const countRow = db.prepare('SELECT COUNT(*) as total FROM occurrence_params').get();
+  if (countRow && countRow.total > 0) return;
+
+  const insertParam = db.prepare(`
+    INSERT INTO occurrence_params (group_key, code, label, color, is_resolved, is_critical, sort_order)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  // 1. Categoria / Tipo (TYPE)
+  const defaultTypes = [
+    ['TYPE', 'SEGURANCA', 'Segurança do Trabalho / Incidente', 'rose', 0, 0, 1],
+    ['TYPE', 'ATRASO_MATERIAL', 'Atraso de Entrega / Suprimentos', 'amber', 0, 0, 2],
+    ['TYPE', 'FALHA_EQUIPAMENTO', 'Falha / Manutenção de Equipamento', 'orange', 0, 0, 3],
+    ['TYPE', 'QUALIDADE', 'Qualidade / Não Conformidade Executiva', 'indigo', 0, 0, 4],
+    ['TYPE', 'CLIMA', 'Intercorrência Climática / Drenagem', 'sky', 0, 0, 5],
+    ['TYPE', 'PROJETO', 'Interferência / Revisão de Projeto (RFI)', 'purple', 0, 0, 6],
+    ['TYPE', 'FISCALIZACAO', 'Vistoria / Notificação de Fiscalização', 'emerald', 0, 0, 7],
+    ['TYPE', 'EFETIVO', 'Falta de Efetivo / Empreiteira', 'slate', 0, 0, 8],
+    ['TYPE', 'OUTROS', 'Outros', 'slate', 0, 0, 9]
+  ];
+
+  // 2. Grau de Severidade (SEVERITY)
+  const defaultSeverities = [
+    ['SEVERITY', 'BAIXA', 'Baixa', 'slate', 0, 0, 1],
+    ['SEVERITY', 'MEDIA', 'Média', 'amber', 0, 0, 2],
+    ['SEVERITY', 'ALTA', 'Alta', 'orange', 0, 1, 3],
+    ['SEVERITY', 'CRITICA', 'Crítica (Urgente)', 'rose', 0, 1, 4]
+  ];
+
+  // 3. Status (STATUS)
+  const defaultStatuses = [
+    ['STATUS', 'ABERTA', 'Aberta', 'rose', 0, 0, 1],
+    ['STATUS', 'EM_ANDAMENTO', 'Em Tratamento', 'amber', 0, 0, 2],
+    ['STATUS', 'AGUARDANDO_TERCEIRO', 'Aguardando Fornecedor / Projetista', 'sky', 0, 0, 3],
+    ['STATUS', 'RESOLVIDA', 'Resolvida / Concluída', 'emerald', 1, 0, 4]
+  ];
+
+  // 4. Setor / Frente de Serviço (SECTOR)
+  const defaultSectors = [
+    ['SECTOR', 'CANTEIRO_GERAL', 'Canteiro Geral / Administração', 'slate', 0, 0, 1],
+    ['SECTOR', 'FUNDACAO_SUBSOLO', 'Fundação e Subsolos', 'sky', 0, 0, 2],
+    ['SECTOR', 'TORRE_A_ESTRUTURA', 'Torre A - Estrutura e Fôrmas', 'indigo', 0, 0, 3],
+    ['SECTOR', 'TORRE_A_PRUMADA', 'Torre A - Prumada Externa Sul', 'amber', 0, 0, 4],
+    ['SECTOR', 'TORRE_B_ALVENARIA', 'Torre B - Alvenaria e Vedação', 'orange', 0, 0, 5],
+    ['SECTOR', 'INSTALACOES_PREDIAIS', 'Instalações Elétricas / Hidrossanitárias / HVAC', 'emerald', 0, 0, 6],
+    ['SECTOR', 'FACHADA_EXTERNA', 'Fachada Externa / Balancim', 'rose', 0, 0, 7],
+    ['SECTOR', 'ALMOXARIFADO_PATIO', 'Pátio de Armação / Almoxarifado', 'purple', 0, 0, 8],
+    ['SECTOR', 'DRENAGEM_TERRAPLANAGEM', 'Setor Oeste - Bacia de Contenção / Terraplanagem', 'sky', 0, 0, 9]
+  ];
+
+  [...defaultTypes, ...defaultSeverities, ...defaultStatuses, ...defaultSectors].forEach((row) => {
+    insertParam.run(...row);
+  });
 }
 
 function seedIfEmpty() {
