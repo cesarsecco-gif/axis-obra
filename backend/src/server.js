@@ -106,6 +106,11 @@ function authenticate(req, res, next) {
 // 0. AUTHENTICATION & DEMO ACCOUNTS
 // ============================================================================
 
+// Healthcheck endpoint for Coolify / Docker
+app.get('/api/health', (_req, res) => {
+  res.json({ status: 'ok', service: 'axis-obra', timestamp: new Date().toISOString() });
+});
+
 app.get('/api/auth/demo-users', (_req, res) => {
   const users = db
     .prepare('SELECT id, name, email, role, crea_cft, phone FROM users WHERE active = 1 ORDER BY id ASC')
@@ -1336,6 +1341,6 @@ if (fs.existsSync(frontendDist)) {
   });
 }
 
-app.listen(PORT, () => {
-  console.log(`AXIS OBRA Backend rodando em http://localhost:${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`AXIS OBRA Backend rodando em http://0.0.0.0:${PORT}`);
 });

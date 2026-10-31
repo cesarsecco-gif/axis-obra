@@ -160,6 +160,7 @@ function initDatabase() {
     );
   `);
 
+  ensureSamplePhotos();
   seedIfEmpty();
 }
 
@@ -220,15 +221,7 @@ function createSampleSvgPhoto(filename, title, subtitle, stage, date, primaryCol
   fs.writeFileSync(filePath, svg, 'utf-8');
 }
 
-function seedIfEmpty() {
-  const countRow = db.prepare('SELECT COUNT(*) as total FROM users').get();
-  if (countRow && countRow.total > 0) {
-    return;
-  }
-
-  console.log('Populando banco de dados inicial do AXIS OBRA...');
-
-  // 1. Create sample SVG photos
+function ensureSamplePhotos() {
   createSampleSvgPhoto(
     'foto- concretagem-laje.svg',
     'Concretagem da Laje do 8º Pavimento - Torre A',
@@ -274,6 +267,15 @@ function seedIfEmpty() {
     '#1e293b',
     '#22d3ee'
   );
+}
+
+function seedIfEmpty() {
+  const countRow = db.prepare('SELECT COUNT(*) as total FROM users').get();
+  if (countRow && countRow.total > 0) {
+    return;
+  }
+
+  console.log('Populando banco de dados inicial do AXIS OBRA...');
 
   // 2. Insert Users
   const insertUser = db.prepare(`

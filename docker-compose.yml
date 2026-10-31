@@ -1,0 +1,18 @@
+services:
+  axis-obra:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+    volumes:
+      - axis_obra_data:/app/backend/data
+      - axis_obra_uploads:/app/backend/uploads
+
+volumes:
+  axis_obra_data:
+  axis_obra_uploads:

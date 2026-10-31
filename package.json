@@ -3,11 +3,15 @@
   "version": "1.0.0",
   "private": true,
   "description": "Sistema Completo de Gerenciamento de Obras - AXIS OBRA (Node.js/Express + SQLite + React)",
+  "engines": {
+    "node": ">=22.5.0"
+  },
   "scripts": {
     "install:all": "npm --prefix backend install && npm --prefix frontend install",
+    "build": "npm --prefix backend install && npm --prefix frontend install && npm --prefix frontend run build",
+    "start": "node backend/src/server.js",
     "start:backend": "npm --prefix backend start",
     "start:frontend": "npm --prefix frontend run dev",
     "build:frontend": "npm --prefix frontend run build"
   }
 }
-
