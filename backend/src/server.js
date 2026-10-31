@@ -1050,6 +1050,79 @@ app.post('/api/photos', authenticate, upload.single('image'), (req, res) => {
   res.status(201).json(created);
 });
 
+app.put('/api/photos/:id', authenticate, upload.single('image'), (req, res) => {
+  const photoId = Number(req.params.id);
+  const existing = db.prepare('SELECT * FROM photos WHERE id = ?').get(photoId);
+  if (!existing) {
+    return res.status(404).json({ error: 'Registro fotográfico não encontrado.' });
+  }
+
+  if (!canUserAccessProject(req.user, existing.project_id)) {
+    return res.status(403).json({ error: 'Sem permissão para editar este registro.' });
+  }
+
+  const {
+    project_id,
+    title,
+    description,
+    stage,
+    location_area,
+    taken_at,
+    weather_condition,
+    image_base64
+  } = req.body;
+
+  const targetProjectId = project_id ? Number(project_id) : existing.project_id;
+  if (!canUserAccessProject(req.user, targetProjectId)) {
+    return res.status(403).json({ error: 'Sem permissão para transferir foto para esta obra.' });
+  }
+
+  let imageUrl = existing.image_url;
+  if (req.file) {
+    imageUrl = `/uploads/${req.file.filename}`;
+  } else if (image_base64 && image_base64.startsWith('data:image/')) {
+    const matches = image_base64.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/);
+    if (matches) {
+      let ext = matches[1].toLowerCase();
+      if (ext === 'jpeg') ext = 'jpg';
+      if (ext === 'svg+xml') ext = 'svg';
+      const filename = `foto-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ext}`;
+      const filePath = path.join(uploadsDir, filename);
+      fs.writeFileSync(filePath, Buffer.from(matches[2], 'base64'));
+      imageUrl = `/uploads/${filename}`;
+    }
+  }
+
+  db.prepare(`
+    UPDATE photos
+    SET project_id = ?, title = ?, description = ?, stage = ?,
+        location_area = ?, taken_at = ?, image_url = ?, weather_condition = ?
+    WHERE id = ?
+  `).run(
+    targetProjectId,
+    title ? title.trim() : existing.title,
+    description !== undefined ? description : existing.description,
+    stage || existing.stage,
+    location_area !== undefined ? location_area : existing.location_area,
+    taken_at || existing.taken_at,
+    imageUrl,
+    weather_condition || existing.weather_condition,
+    photoId
+  );
+
+  const updated = db
+    .prepare(`
+      SELECT ph.*, p.name as project_name, p.code as project_code, u.name as author_name
+      FROM photos ph
+      JOIN projects p ON p.id = ph.project_id
+      LEFT JOIN users u ON u.id = ph.user_id
+      WHERE ph.id = ?
+    `)
+    .get(photoId);
+
+  res.json(updated);
+});
+
 app.delete('/api/photos/:id', authenticate, (req, res) => {
   const photoId = Number(req.params.id);
   const existing = db.prepare('SELECT * FROM photos WHERE id = ?').get(photoId);
