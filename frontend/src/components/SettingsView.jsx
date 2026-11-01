@@ -525,10 +525,35 @@ export default function SettingsView({ projects, selectedProjectId, currentUser 
                   />
                 </div>
               ) : (
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    URL ou Caminho da Imagem do Banner
+                <div className="space-y-3">
+                  <label className="block text-xs font-bold text-slate-700">
+                    Imagem / Logo do Banner
                   </label>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <label className="cursor-pointer inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold transition">
+                      <Upload className="w-4 h-4 text-amber-400" />
+                      Selecionar Imagem do Banner...
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          const reader = new FileReader();
+                          reader.onload = () => {
+                            setSettingsForm((prev) => ({
+                              ...prev,
+                              banner_image_base64: reader.result,
+                              banner_image_url: reader.result
+                            }));
+                          };
+                          reader.readAsDataURL(file);
+                        }}
+                        className="hidden"
+                      />
+                    </label>
+                    <span className="text-xs text-slate-500">ou informe o link/caminho:</span>
+                  </div>
                   <input
                     type="text"
                     value={settingsForm.banner_image_url || ''}
@@ -536,6 +561,16 @@ export default function SettingsView({ projects, selectedProjectId, currentUser 
                     placeholder="Ex: /uploads/meu-banner.png ou https://..."
                     className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
                   />
+                  {settingsForm.banner_image_url && (
+                    <div className="p-3 border border-slate-200 rounded-lg bg-slate-50 text-center">
+                      <span className="text-[11px] font-bold text-slate-500 block mb-1">Prévia do Banner Atual:</span>
+                      <img
+                        src={settingsForm.banner_image_url}
+                        alt="Prévia Banner"
+                        className="max-h-16 object-contain mx-auto border border-slate-200 rounded p-1 bg-white"
+                      />
+                    </div>
+                  )}
                 </div>
               )}
             </div>
