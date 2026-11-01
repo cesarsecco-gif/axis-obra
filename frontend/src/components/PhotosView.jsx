@@ -7,7 +7,6 @@ import {
   MapPin,
   Calendar,
   User,
-  Filter,
   Upload,
   Eye,
   X,
@@ -19,7 +18,9 @@ import {
   FolderOpen,
   ChevronDown,
   ChevronRight,
-  Layers
+  Layers,
+  CopyCheck,
+  Images
 } from 'lucide-react';
 import { apiRequest, formatDateBR } from '../api';
 
@@ -57,6 +58,14 @@ const MONTH_NAMES = [
   'Dezembro'
 ];
 
+function cleanFileNameToTitle(filename) {
+  if (!filename) return '';
+  const withoutExt = filename.replace(/\.[^/.]+$/, '');
+  const cleaned = withoutExt.replace(/[-_]+/g, ' ').trim();
+  if (!cleaned) return '';
+  return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+}
+
 export default function PhotosView({ projects, selectedProjectId, onRefreshDashboard }) {
   const [photos, setPhotos] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -74,19 +83,30 @@ export default function PhotosView({ projects, selectedProjectId, onRefreshDashb
   const [editingPhoto, setEditingPhoto] = useState(null);
   const [lightboxPhoto, setLightboxPhoto] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [submitProgress, setSubmitProgress] = useState('');
   const [error, setError] = useState('');
 
-  const initialForm = {
+  // Common batch defaults (for New Photo Batch) & single Edit form
+  const initialCommonForm = {
     project_id: selectedProjectId !== 'ALL' ? selectedProjectId : (projects[0]?.id || ''),
+    taken_at: new Date().toISOString().slice(0, 10),
+    weather_condition: 'SOL',
+    default_stage: 'ESTRUTURA',
+    default_location_area: '',
+    // Used when editing a single existing photo:
     title: '',
     description: '',
     stage: 'ESTRUTURA',
-    location_area: '',
-    taken_at: new Date().toISOString().slice(0, 10),
-    weather_condition: 'SOL'
+    location_area: ''
   };
 
-  const [form, setForm] = useState(initialForm);
+  const [form, setForm] = useState(initialCommonForm);
+
+  // Queue of photos when creating (supports 1 or many photos in the same batch)
+  // Each item: { id, file, base64, previewUrl, title, stage, location_area, description }
+  const [batchItems, setBatchItems] = useState([]);
+
+  // Single file replacement when editing an existing photo
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState('');
   const [generatedBase64, setGeneratedBase64] = useState('');
@@ -123,10 +143,12 @@ export default function PhotosView({ projects, selectedProjectId, onRefreshDashb
   const openCreateModal = () => {
     setEditingPhoto(null);
     setError('');
+    setSubmitProgress('');
     setForm({
-      ...initialForm,
+      ...initialCommonForm,
       project_id: selectedProjectId !== 'ALL' ? selectedProjectId : (projects[0]?.id || '')
     });
+    setBatchItems([]);
     setSelectedFile(null);
     setGeneratedBase64('');
     setPreviewUrl('');
@@ -136,7 +158,9 @@ export default function PhotosView({ projects, selectedProjectId, onRefreshDashb
   const openEditModal = (photo) => {
     setEditingPhoto(photo);
     setError('');
+    setSubmitProgress('');
     setForm({
+      ...initialCommonForm,
       project_id: photo.project_id,
       title: photo.title || '',
       description: photo.description || '',
@@ -151,7 +175,60 @@ export default function PhotosView({ projects, selectedProjectId, onRefreshDashb
     setShowModal(true);
   };
 
-  const handleFileChange = (e) => {
+  // Handle selecting multiple files in Create Mode
+  const handleBatchFilesChange = (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    files.forEach((file, index) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const autoTitle =
+          cleanFileNameToTitle(file.name) ||
+          `Registro Fotográfico #${batchItems.length + index + 1}`;
+        setBatchItems((prev) => [
+          ...prev,
+          {
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}-${index}`,
+            file,
+            base64: '',
+            previewUrl: reader.result,
+            title: autoTitle,
+            stage: form.default_stage || 'ESTRUTURA',
+            location_area: form.default_location_area || '',
+            description: ''
+          }
+        ]);
+      };
+      reader.readAsDataURL(file);
+    });
+
+    // Reset input so selecting the same file again works if needed
+    e.target.value = '';
+  };
+
+  const updateBatchItem = (itemId, field, value) => {
+    setBatchItems((prev) =>
+      prev.map((item) => (item.id === itemId ? { ...item, [field]: value } : item))
+    );
+  };
+
+  const removeBatchItem = (itemId) => {
+    setBatchItems((prev) => prev.filter((item) => item.id !== itemId));
+  };
+
+  const applyDefaultsToAllBatchItems = () => {
+    setBatchItems((prev) =>
+      prev.map((item) => ({
+        ...item,
+        stage: form.default_stage,
+        location_area: form.default_location_area || item.location_area
+      }))
+    );
+  };
+
+  // Handle single file replacement in Edit Mode
+  const handleEditFileChange = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setSelectedFile(file);
@@ -161,12 +238,12 @@ export default function PhotosView({ projects, selectedProjectId, onRefreshDashb
     reader.readAsDataURL(file);
   };
 
-  const generateStampedTechnicalImage = () => {
-    const proj = projects.find((p) => Number(p.id) === Number(form.project_id)) || projects[0];
-    const titleText = form.title || 'Inspeção de Execução de Serviço em Campo';
-    const areaText = form.location_area || 'Setor Principal • Canteiro de Obras';
-    const stageText = form.stage || 'ESTRUTURA';
-    const dateText = formatDateBR(form.taken_at);
+  const buildStampedSvgBase64 = ({ projectId, title, locationArea, stage, takenAt }) => {
+    const proj = projects.find((p) => Number(p.id) === Number(projectId)) || projects[0];
+    const titleText = title || 'Inspeção de Execução de Serviço em Campo';
+    const areaText = locationArea || 'Setor Principal • Canteiro de Obras';
+    const stageText = stage || 'ESTRUTURA';
+    const dateText = formatDateBR(takenAt);
 
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" width="800" height="500">
       <defs>
@@ -192,67 +269,175 @@ export default function PhotosView({ projects, selectedProjectId, onRefreshDashb
       <text x="30" y="478" font-family="Consolas, monospace" font-size="13" fill="#f59e0b">AXIS OBRA RDO • DATA: ${dateText} • REGISTRO DE CAMPO</text>
     </svg>`;
 
-    const base64 = `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`;
+    return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`;
+  };
+
+  const addDemoStampedPhotoToBatch = () => {
+    const nextNum = batchItems.length + 1;
+    const defaultTitle = `Vistoria Técnica de Execução #${nextNum}`;
+    const b64 = buildStampedSvgBase64({
+      projectId: form.project_id,
+      title: defaultTitle,
+      locationArea: form.default_location_area,
+      stage: form.default_stage,
+      takenAt: form.taken_at
+    });
+
+    setBatchItems((prev) => [
+      ...prev,
+      {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        file: null,
+        base64: b64,
+        previewUrl: b64,
+        title: defaultTitle,
+        stage: form.default_stage || 'ESTRUTURA',
+        location_area: form.default_location_area || '',
+        description: ''
+      }
+    ]);
+  };
+
+  const generateEditStampedImage = () => {
+    const b64 = buildStampedSvgBase64({
+      projectId: form.project_id,
+      title: form.title,
+      locationArea: form.location_area,
+      stage: form.stage,
+      takenAt: form.taken_at
+    });
     setSelectedFile(null);
-    setGeneratedBase64(base64);
-    setPreviewUrl(base64);
+    setGeneratedBase64(b64);
+    setPreviewUrl(b64);
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
 
-    if (!form.project_id || !form.title) {
-      setError('Informe a obra e o título do registro fotográfico.');
+    if (!form.project_id) {
+      setError('Selecione a obra vinculada.');
       return;
     }
 
-    if (!editingPhoto && !selectedFile && !generatedBase64) {
-      setError('Anexe uma imagem do seu dispositivo ou clique em "Gerar Carimbo Técnico de Demonstração".');
+    // MODE A: EDITING SINGLE PHOTO
+    if (editingPhoto) {
+      if (!form.title.trim()) {
+        setError('Informe o título do registro fotográfico.');
+        return;
+      }
+
+      setSubmitting(true);
+      try {
+        const url = `/api/photos/${editingPhoto.id}`;
+        if (selectedFile) {
+          const fd = new FormData();
+          fd.append('project_id', form.project_id);
+          fd.append('title', form.title);
+          fd.append('description', form.description);
+          fd.append('stage', form.stage);
+          fd.append('location_area', form.location_area);
+          fd.append('taken_at', form.taken_at);
+          fd.append('weather_condition', form.weather_condition);
+          fd.append('image', selectedFile);
+
+          await apiRequest(url, { method: 'PUT', body: fd });
+        } else {
+          await apiRequest(url, {
+            method: 'PUT',
+            body: JSON.stringify({
+              project_id: form.project_id,
+              title: form.title,
+              description: form.description,
+              stage: form.stage,
+              location_area: form.location_area,
+              taken_at: form.taken_at,
+              weather_condition: form.weather_condition,
+              ...(generatedBase64 ? { image_base64: generatedBase64 } : {})
+            })
+          });
+        }
+
+        setShowModal(false);
+        setEditingPhoto(null);
+        await loadPhotos();
+        if (onRefreshDashboard) onRefreshDashboard();
+      } catch (err) {
+        setError(err.message);
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+
+    // MODE B: CREATING 1 OR MULTIPLE PHOTOS OF THE SAME DAY
+    if (batchItems.length === 0) {
+      setError('Selecione pelo menos uma foto do dispositivo ou clique em "+ Gerar Foto com Carimbo".');
+      return;
+    }
+
+    const emptyTitleItem = batchItems.find((item) => !item.title || !item.title.trim());
+    if (emptyTitleItem) {
+      setError('Todas as fotos da lista precisam ter um título preenchido.');
       return;
     }
 
     setSubmitting(true);
     try {
-      const url = editingPhoto ? `/api/photos/${editingPhoto.id}` : '/api/photos';
-      const method = editingPhoto ? 'PUT' : 'POST';
+      for (let i = 0; i < batchItems.length; i++) {
+        const item = batchItems[i];
+        setSubmitProgress(`Salvando foto ${i + 1} de ${batchItems.length}...`);
 
-      if (selectedFile) {
-        const fd = new FormData();
-        fd.append('project_id', form.project_id);
-        fd.append('title', form.title);
-        fd.append('description', form.description);
-        fd.append('stage', form.stage);
-        fd.append('location_area', form.location_area);
-        fd.append('taken_at', form.taken_at);
-        fd.append('weather_condition', form.weather_condition);
-        fd.append('image', selectedFile);
+        if (item.file) {
+          const fd = new FormData();
+          fd.append('project_id', form.project_id);
+          fd.append('title', item.title.trim());
+          fd.append('description', item.description || '');
+          fd.append('stage', item.stage || form.default_stage || 'ESTRUTURA');
+          fd.append('location_area', item.location_area || '');
+          fd.append('taken_at', form.taken_at);
+          fd.append('weather_condition', form.weather_condition);
+          fd.append('image', item.file);
 
-        await apiRequest(url, {
-          method,
-          body: fd
-        });
-      } else {
-        await apiRequest(url, {
-          method,
-          body: JSON.stringify({
-            ...form,
-            ...(generatedBase64 ? { image_base64: generatedBase64 } : {})
-          })
-        });
+          await apiRequest('/api/photos', {
+            method: 'POST',
+            body: fd
+          });
+        } else {
+          const finalBase64 = buildStampedSvgBase64({
+            projectId: form.project_id,
+            title: item.title.trim(),
+            locationArea: item.location_area,
+            stage: item.stage,
+            takenAt: form.taken_at
+          });
+
+          await apiRequest('/api/photos', {
+            method: 'POST',
+            body: JSON.stringify({
+              project_id: form.project_id,
+              title: item.title.trim(),
+              description: item.description || '',
+              stage: item.stage || form.default_stage || 'ESTRUTURA',
+              location_area: item.location_area || '',
+              taken_at: form.taken_at,
+              weather_condition: form.weather_condition,
+              image_base64: finalBase64
+            })
+          });
+        }
       }
 
       setShowModal(false);
-      setEditingPhoto(null);
-      setSelectedFile(null);
-      setPreviewUrl('');
-      setGeneratedBase64('');
+      setBatchItems([]);
+      setSubmitProgress('');
       await loadPhotos();
       if (onRefreshDashboard) onRefreshDashboard();
     } catch (err) {
       setError(err.message);
     } finally {
       setSubmitting(false);
+      setSubmitProgress('');
     }
   };
 
@@ -485,7 +670,7 @@ export default function PhotosView({ projects, selectedProjectId, onRefreshDashb
             <h2 className="text-xl font-bold text-slate-900">1. Registro Fotográfico de Obras</h2>
           </div>
           <p className="text-sm text-slate-500 mt-1">
-            Acompanhamento visual de evolução física com agrupamento por Ano, Mês, Data ou Etapa Construtiva.
+            Acompanhamento visual com upload múltiplo de fotos do dia e agrupamento por Ano, Mês, Data ou Etapa.
           </p>
         </div>
 
@@ -494,7 +679,7 @@ export default function PhotosView({ projects, selectedProjectId, onRefreshDashb
           className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-semibold text-sm shadow-sm transition"
         >
           <Plus className="w-4 h-4" />
-          Novo Registro Fotográfico
+          Novo Registro Fotográfico (Individual ou Lote)
         </button>
       </div>
 
@@ -673,16 +858,30 @@ export default function PhotosView({ projects, selectedProjectId, onRefreshDashb
         </div>
       )}
 
-      {/* Modal: Create or Edit Photo Record */}
+      {/* =====================================================================
+          MODAL: CREATE (MULTI-PHOTO BATCH OF THE DAY) OR EDIT (SINGLE PHOTO)
+         ===================================================================== */}
       {showModal && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-xl border border-slate-200 my-8">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-200">
+          <div className="bg-white rounded-2xl max-w-4xl w-full p-6 shadow-xl border border-slate-200 my-8 max-h-[92vh] flex flex-col">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-4 border-b border-slate-200 shrink-0">
               <div className="flex items-center gap-2.5">
-                <Camera className="w-5 h-5 text-amber-600" />
-                <h3 className="text-lg font-bold text-slate-900">
-                  {editingPhoto ? 'Editar Registro Fotográfico de Obra' : 'Novo Registro Fotográfico de Obra'}
-                </h3>
+                <div className="p-2 rounded-lg bg-amber-500/10 text-amber-600">
+                  {editingPhoto ? <Edit3 className="w-5 h-5" /> : <Images className="w-5 h-5" />}
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900">
+                    {editingPhoto
+                      ? 'Editar Registro Fotográfico de Obra'
+                      : 'Novo Registro Fotográfico (Envio Rápido de 1 ou Várias Fotos do Dia)'}
+                  </h3>
+                  {!editingPhoto && (
+                    <p className="text-xs text-slate-500">
+                      Defina a Obra e a Data do dia, selecione quantas fotos quiser de uma vez e personalize as opções de cada foto abaixo.
+                    </p>
+                  )}
+                </div>
               </div>
               <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-slate-600">
                 <X className="w-5 h-5" />
@@ -690,182 +889,431 @@ export default function PhotosView({ projects, selectedProjectId, onRefreshDashb
             </div>
 
             {error && (
-              <div className="mt-4 p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium">
+              <div className="mt-4 p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium shrink-0">
                 {error}
               </div>
             )}
 
-            <form onSubmit={handleSubmit} className="mt-4 space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Obra Vinculada *</label>
-                  <select
-                    required
-                    value={form.project_id}
-                    onChange={(e) => setForm({ ...form, project_id: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
-                  >
-                    <option value="">Selecione a obra...</option>
-                    {projects.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.code} — {p.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+            <form onSubmit={handleSubmit} className="mt-4 space-y-5 overflow-y-auto pr-1 flex-1">
+              {editingPhoto ? (
+                /* -------------------------------------------------------------
+                   MODO EDIÇÃO INDIVIDUAL DE REGISTRO EXISTENTE
+                   ------------------------------------------------------------- */
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">Obra Vinculada *</label>
+                      <select
+                        required
+                        value={form.project_id}
+                        onChange={(e) => setForm({ ...form, project_id: e.target.value })}
+                        className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
+                      >
+                        <option value="">Selecione a obra...</option>
+                        {projects.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.code} — {p.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Etapa Construtiva *</label>
-                  <select
-                    value={form.stage}
-                    onChange={(e) => setForm({ ...form, stage: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
-                  >
-                    {STAGES.map((s) => (
-                      <option key={s.value} value={s.value}>
-                        {s.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">Etapa Construtiva *</label>
+                      <select
+                        value={form.stage}
+                        onChange={(e) => setForm({ ...form, stage: e.target.value })}
+                        className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
+                      >
+                        {STAGES.map((s) => (
+                          <option key={s.value} value={s.value}>
+                            {s.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Título do Registro Fotográfico *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ex: Concretagem dos pilares P12 a P18 do 10º Pavimento"
-                  value={form.title}
-                  onChange={(e) => setForm({ ...form, title: e.target.value })}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
-                />
-              </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">Título do Registro Fotográfico *</label>
+                    <input
+                      type="text"
+                      required
+                      value={form.title}
+                      onChange={(e) => setForm({ ...form, title: e.target.value })}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
+                    />
+                  </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Localização / Setor / Bloco</label>
-                  <input
-                    type="text"
-                    placeholder="Ex: Bloco A - 10º Pavimento"
-                    value={form.location_area}
-                    onChange={(e) => setForm({ ...form, location_area: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Data do Registro *</label>
-                  <input
-                    type="date"
-                    required
-                    value={form.taken_at}
-                    onChange={(e) => setForm({ ...form, taken_at: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Condição Climática</label>
-                  <select
-                    value={form.weather_condition}
-                    onChange={(e) => setForm({ ...form, weather_condition: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
-                  >
-                    <option value="SOL">Ensolarado</option>
-                    <option value="NUBLADO">Nublado</option>
-                    <option value="CHUVA_FRACA">Chuva Fraca</option>
-                    <option value="CHUVA_FORTE">Chuva Forte</option>
-                  </select>
-                </div>
-              </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">Localização / Setor / Bloco</label>
+                      <input
+                        type="text"
+                        value={form.location_area}
+                        onChange={(e) => setForm({ ...form, location_area: e.target.value })}
+                        className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">Data do Registro *</label>
+                      <input
+                        type="date"
+                        required
+                        value={form.taken_at}
+                        onChange={(e) => setForm({ ...form, taken_at: e.target.value })}
+                        className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">Condição Climática</label>
+                      <select
+                        value={form.weather_condition}
+                        onChange={(e) => setForm({ ...form, weather_condition: e.target.value })}
+                        className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
+                      >
+                        <option value="SOL">Ensolarado</option>
+                        <option value="NUBLADO">Nublado</option>
+                        <option value="CHUVA_FRACA">Chuva Fraca</option>
+                        <option value="CHUVA_FORTE">Chuva Forte</option>
+                      </select>
+                    </div>
+                  </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Laudo / Observações Técnicas</label>
-                <textarea
-                  rows={2}
-                  placeholder="Descreva detalhes técnicos verificados, Fck do concreto, armaduras, equipamentos utilizados..."
-                  value={form.description}
-                  onChange={(e) => setForm({ ...form, description: e.target.value })}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
-                />
-              </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">Laudo / Observações Técnicas</label>
+                    <textarea
+                      rows={2}
+                      value={form.description}
+                      onChange={(e) => setForm({ ...form, description: e.target.value })}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
+                    />
+                  </div>
 
-              {/* Image Upload or Technical Stamp Generator */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="block text-xs font-semibold text-slate-700">
-                    {editingPhoto ? 'Substituir Fotografia (Opcional)' : 'Fotografia da Obra *'}
-                  </label>
-                  <button
-                    type="button"
-                    onClick={generateStampedTechnicalImage}
-                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-700 hover:text-amber-800 bg-amber-50 hover:bg-amber-100 px-2.5 py-1 rounded-md border border-amber-200 transition"
-                  >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    Atualizar Carimbo Técnico
-                  </button>
-                </div>
-
-                <div className="border-2 border-dashed border-slate-300 rounded-xl p-4 text-center hover:border-amber-500 transition">
-                  <input
-                    id="photo-upload-input"
-                    type="file"
-                    accept="image/*"
-                    onChange={handleFileChange}
-                    className="hidden"
-                  />
-                  <label
-                    htmlFor="photo-upload-input"
-                    className="cursor-pointer flex flex-col items-center justify-center gap-1.5"
-                  >
-                    <Upload className="w-6 h-6 text-slate-400" />
-                    <span className="text-xs font-semibold text-slate-700">
-                      {editingPhoto
-                        ? 'Clique caso queira enviar uma nova foto para substituir a atual'
-                        : 'Clique para selecionar uma foto do computador ou câmera'}
-                    </span>
-                    <span className="text-[11px] text-slate-400">Formatos suportados: JPG, PNG, WEBP, SVG (Máx. 15MB)</span>
-                  </label>
-                </div>
-
-                {previewUrl && (
-                  <div className="mt-3 relative rounded-xl overflow-hidden border border-slate-200 h-44 bg-slate-900">
-                    <img src={previewUrl} alt="Preview" className="w-full h-full object-contain" />
-                    {!editingPhoto && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-semibold text-slate-700">
+                        Substituir Fotografia (Opcional)
+                      </label>
                       <button
                         type="button"
-                        onClick={() => {
-                          setSelectedFile(null);
-                          setGeneratedBase64('');
-                          setPreviewUrl('');
-                        }}
-                        className="absolute top-2 right-2 p-1.5 rounded-full bg-slate-900/80 text-white hover:bg-rose-600"
+                        onClick={generateEditStampedImage}
+                        className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-700 hover:text-amber-800 bg-amber-50 hover:bg-amber-100 px-2.5 py-1 rounded-md border border-amber-200 transition"
                       >
-                        <X className="w-4 h-4" />
+                        <Sparkles className="w-3.5 h-3.5" />
+                        Atualizar Carimbo Técnico
                       </button>
+                    </div>
+
+                    <div className="border-2 border-dashed border-slate-300 rounded-xl p-4 text-center hover:border-amber-500 transition">
+                      <input
+                        id="photo-edit-upload-input"
+                        type="file"
+                        accept="image/*"
+                        onChange={handleEditFileChange}
+                        className="hidden"
+                      />
+                      <label
+                        htmlFor="photo-edit-upload-input"
+                        className="cursor-pointer flex flex-col items-center justify-center gap-1"
+                      >
+                        <Upload className="w-6 h-6 text-slate-400" />
+                        <span className="text-xs font-semibold text-slate-700">
+                          Clique caso queira enviar uma nova foto para substituir a atual
+                        </span>
+                      </label>
+                    </div>
+
+                    {previewUrl && (
+                      <div className="mt-3 relative rounded-xl overflow-hidden border border-slate-200 h-44 bg-slate-900">
+                        <img src={previewUrl} alt="Preview" className="w-full h-full object-contain" />
+                      </div>
                     )}
                   </div>
-                )}
-              </div>
+                </>
+              ) : (
+                /* -------------------------------------------------------------
+                   MODO CRIAÇÃO EM LOTE (VÁRIAS FOTOS DO MESMO DIA)
+                   ------------------------------------------------------------- */
+                <>
+                  {/* 1. Dados Comuns do Dia */}
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                        1. Dados Comuns do Lote (Mesma Obra e Mesmo Dia)
+                      </span>
+                      {batchItems.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={applyDefaultsToAllBatchItems}
+                          className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-700 hover:text-amber-800 bg-amber-100/80 hover:bg-amber-100 px-2.5 py-1 rounded-md border border-amber-300 transition"
+                        >
+                          <CopyCheck className="w-3.5 h-3.5" />
+                          Aplicar Etapa e Setor Padrão a Todas as {batchItems.length} Fotos
+                        </button>
+                      )}
+                    </div>
 
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-200">
-                <button
-                  type="button"
-                  onClick={() => setShowModal(false)}
-                  className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 text-sm font-medium hover:bg-slate-50"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="px-5 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-semibold text-sm shadow-sm disabled:opacity-50"
-                >
-                  {submitting
-                    ? 'Salvando...'
-                    : editingPhoto
-                    ? 'Salvar Alterações'
-                    : 'Salvar Registro Fotográfico'}
-                </button>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                      <div className="lg:col-span-2">
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">Obra Vinculada *</label>
+                        <select
+                          required
+                          value={form.project_id}
+                          onChange={(e) => setForm({ ...form, project_id: e.target.value })}
+                          className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
+                        >
+                          <option value="">Selecione a obra...</option>
+                          {projects.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.code} — {p.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">Data das Fotos *</label>
+                        <input
+                          type="date"
+                          required
+                          value={form.taken_at}
+                          onChange={(e) => setForm({ ...form, taken_at: e.target.value })}
+                          className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">Clima do Dia</label>
+                        <select
+                          value={form.weather_condition}
+                          onChange={(e) => setForm({ ...form, weather_condition: e.target.value })}
+                          className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
+                        >
+                          <option value="SOL">Ensolarado</option>
+                          <option value="NUBLADO">Nublado</option>
+                          <option value="CHUVA_FRACA">Chuva Fraca</option>
+                          <option value="CHUVA_FORTE">Chuva Forte</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">Etapa Padrão</label>
+                        <select
+                          value={form.default_stage}
+                          onChange={(e) => setForm({ ...form, default_stage: e.target.value })}
+                          className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
+                        >
+                          {STAGES.map((s) => (
+                            <option key={s.value} value={s.value}>
+                              {s.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Localização / Setor / Bloco Padrão (pré-preenche novas fotos adicionadas)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Ex: Torre A - 10º Pavimento (você poderá alterar individualmente em cada foto abaixo)"
+                        value={form.default_location_area}
+                        onChange={(e) => setForm({ ...form, default_location_area: e.target.value })}
+                        className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
+                      />
+                    </div>
+                  </div>
+
+                  {/* 2. Dropzone de Seleção Múltipla */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-700">
+                        2. Selecionar Fotografias ({batchItems.length} adicionada{batchItems.length === 1 ? '' : 's'})
+                      </label>
+                      <button
+                        type="button"
+                        onClick={addDemoStampedPhotoToBatch}
+                        className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-700 hover:text-amber-800 bg-amber-50 hover:bg-amber-100 px-2.5 py-1 rounded-md border border-amber-200 transition"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        + Adicionar Foto com Carimbo Técnico
+                      </button>
+                    </div>
+
+                    <div className="border-2 border-dashed border-amber-400 bg-amber-50/30 rounded-xl p-5 text-center hover:bg-amber-50/60 transition">
+                      <input
+                        id="photo-batch-upload-input"
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        onChange={handleBatchFilesChange}
+                        className="hidden"
+                      />
+                      <label
+                        htmlFor="photo-batch-upload-input"
+                        className="cursor-pointer flex flex-col items-center justify-center gap-1.5"
+                      >
+                        <Upload className="w-7 h-7 text-amber-600" />
+                        <span className="text-sm font-bold text-slate-800">
+                          Clique aqui para selecionar UMA ou VÁRIAS fotos de uma só vez
+                        </span>
+                        <span className="text-xs text-slate-500">
+                          Você pode selecionar múltiplos arquivos (Ctrl/Shift ou galeria do celular) e editar os dados de cada foto abaixo.
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* 3. Lista de Fotos Selecionadas com Edição Individual */}
+                  {batchItems.length > 0 && (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-600">
+                          3. Personalizar Opções de Cada Foto ({batchItems.length})
+                        </h4>
+                        <button
+                          type="button"
+                          onClick={() => setBatchItems([])}
+                          className="text-xs text-rose-600 hover:text-rose-700 font-semibold"
+                        >
+                          Limpar fila de fotos
+                        </button>
+                      </div>
+
+                      <div className="space-y-3">
+                        {batchItems.map((item, idx) => (
+                          <div
+                            key={item.id}
+                            className="p-4 rounded-xl bg-white border border-slate-200 shadow-2xs flex flex-col md:flex-row gap-4 items-start"
+                          >
+                            {/* Thumbnail */}
+                            <div className="w-full md:w-44 h-36 rounded-lg overflow-hidden bg-slate-900 shrink-0 relative border border-slate-200">
+                              <img
+                                src={item.previewUrl}
+                                alt={item.title}
+                                className="w-full h-full object-cover"
+                              />
+                              <span className="absolute top-2 left-2 px-2 py-0.5 rounded bg-slate-900/80 text-amber-400 font-mono text-[11px] font-bold">
+                                Foto #{idx + 1}
+                              </span>
+                            </div>
+
+                            {/* Individual Fields */}
+                            <div className="flex-1 w-full space-y-3">
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                <div className="sm:col-span-2">
+                                  <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                                    Título da Foto #{idx + 1} *
+                                  </label>
+                                  <input
+                                    type="text"
+                                    required
+                                    placeholder="Ex: Armação da viga V-12 ou Concretagem P-04"
+                                    value={item.title}
+                                    onChange={(e) => updateBatchItem(item.id, 'title', e.target.value)}
+                                    className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-sm"
+                                  />
+                                </div>
+
+                                <div>
+                                  <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                                    Etapa Construtiva *
+                                  </label>
+                                  <select
+                                    value={item.stage}
+                                    onChange={(e) => updateBatchItem(item.id, 'stage', e.target.value)}
+                                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-sm bg-white"
+                                  >
+                                    {STAGES.map((s) => (
+                                      <option key={s.value} value={s.value}>
+                                        {s.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div>
+                                  <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                                    Localização / Setor / Pavimento desta Foto
+                                  </label>
+                                  <input
+                                    type="text"
+                                    placeholder="Ex: Bloco A - 8º Pavimento"
+                                    value={item.location_area}
+                                    onChange={(e) => updateBatchItem(item.id, 'location_area', e.target.value)}
+                                    className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs"
+                                  />
+                                </div>
+
+                                <div>
+                                  <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                                    Laudo / Observação Individual
+                                  </label>
+                                  <input
+                                    type="text"
+                                    placeholder="Observações específicas desta imagem..."
+                                    value={item.description}
+                                    onChange={(e) => updateBatchItem(item.id, 'description', e.target.value)}
+                                    className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Remove Photo from Batch */}
+                            <button
+                              type="button"
+                              onClick={() => removeBatchItem(item.id)}
+                              className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition self-end md:self-start"
+                              title="Remover esta foto do lote"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* Modal Footer */}
+              <div className="flex items-center justify-between pt-4 border-t border-slate-200 shrink-0">
+                <div className="text-xs text-slate-500 font-medium">
+                  {submitProgress ? (
+                    <span className="text-amber-700 font-bold">{submitProgress}</span>
+                  ) : !editingPhoto ? (
+                    `${batchItems.length} foto(s) pronta(s) para registro na data ${formatDateBR(form.taken_at)}`
+                  ) : null}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowModal(false)}
+                    className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 text-sm font-medium hover:bg-slate-50"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="px-5 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-sm shadow-sm disabled:opacity-50"
+                  >
+                    {submitting
+                      ? submitProgress || 'Salvando...'
+                      : editingPhoto
+                      ? 'Salvar Alterações'
+                      : batchItems.length > 1
+                      ? `Salvar ${batchItems.length} Registros Fotográficos`
+                      : 'Salvar Registro Fotográfico'}
+                  </button>
+                </div>
               </div>
             </form>
           </div>
