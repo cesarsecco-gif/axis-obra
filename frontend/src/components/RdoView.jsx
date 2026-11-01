@@ -143,22 +143,6 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
     settings: {}
   });
 
-  // Global Report Settings (Configurações do Módulo 8 — Banner e Layout)
-  const [reportSettings, setReportSettings] = useState(null);
-
-  const loadReportSettings = useCallback(async () => {
-    try {
-      const data = await apiRequest('/api/report-settings');
-      setReportSettings(data);
-    } catch (err) {
-      console.warn('Não foi possível carregar configurações globais de relatório:', err);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadReportSettings();
-  }, [loadReportSettings]);
-
   // 12 lines slots per page (reduzido de 20 para 12 conforme solicitado)
   const [servicesLines, setServicesLines] = useState(Array(12).fill(''));
 
@@ -709,24 +693,31 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
     return projects.find((p) => String(p.id) === String(targetProjectId)) || projects[0] || {};
   }, [projects, targetProjectId]);
 
-  const contractSettings = useMemo(() => {
-    return {
-      ...(reportSettings || {}),
-      ...(rdoData.settings || {})
-    };
-  }, [reportSettings, rdoData.settings]);
-
-  const bannerText = contractSettings.banner_text || 'AXIS OBRA ENGENHARIA E CONSTRUÇÕES LTDA\nSUPERINTENDÊNCIA DE ENGENHARIA E CONTROLE DE QUALIDADE';
-  const hasDocTitle = useMemo(() => {
-    return /di[aá]rio\s+de\s+obras/i.test(bannerText);
-  }, [bannerText]);
-
+  const contractSettings = rdoData.settings || {};
   const contractorCompany = contractSettings.contractor_company || 'Consórcio Rodovia PR-317 Iguaraçu Maringá';
   const supervisorCompany = contractSettings.supervisor_company || 'Iguatemi Consultoria e Serviços de Engenharia LTDA.';
   const contractNumber = rdoData.work_code || contractSettings.contract_number || 'CO141/2025 - DT';
   const contractorManager = contractSettings.contractor_manager || 'DANIELLE NARDINO';
   const supervisorEngineer = contractSettings.supervisor_engineer || 'João Carlos Deríssio';
   const fiscalEngineer = contractSettings.fiscal_engineer || 'Alisson';
+
+  // Banner settings from Module 8 (same criterion as Photo Report)
+  const bannerMode = contractSettings.banner_mode || 'TEXT';
+  const bannerImageUrl = contractSettings.banner_image_url || '';
+  const bannerText =
+    contractSettings.banner_text ||
+    'AXIS OBRA ENGENHARIA E CONSTRUÇÕES LTDA\nSUPERINTENDÊNCIA DE ENGENHARIA E CONTROLE DE QUALIDADE';
+  const bannerTextAlign = contractSettings.banner_text_align || 'CENTER';
+  const bannerFontSize = contractSettings.banner_font_size || 'MEDIUM';
+  const bannerBold = contractSettings.banner_bold !== undefined ? Boolean(contractSettings.banner_bold) : true;
+  const bannerItalic = Boolean(contractSettings.banner_italic);
+  const bannerUnderline = Boolean(contractSettings.banner_underline);
+  const bannerColor = contractSettings.banner_color || '#0f172a';
+
+  const bannerAlignCss =
+    bannerTextAlign === 'LEFT' ? 'left' : bannerTextAlign === 'RIGHT' ? 'right' : 'center';
+  const showBannerImg = (bannerMode === 'IMAGE' || bannerMode === 'BOTH') && Boolean(bannerImageUrl);
+  const showBannerTxt = bannerMode === 'TEXT' || bannerMode === 'BOTH' || !bannerImageUrl;
 
   const dateParts = useMemo(() => {
     if (!currentDate) return { day: '01', month: '01', year: '2026', weekdayKey: 1 };
@@ -889,51 +880,46 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
         const isFinal = rdo.status === 'final';
         const pageTitle = pIdx === 0 ? 'SERVIÇOS DESENVOLVIDOS NO DIA:' : 'SERVIÇOS DESENVOLVIDOS NO DIA: (CONTINUAÇÃO)';
 
-        // Dynamic Banner configured in Module 8 (Settings)
-        const bannerMode = contractSettings.banner_mode || 'TEXT';
-        const bannerImgSrc = contractSettings.banner_image_url;
-        const bannerAlign = contractSettings.banner_text_align === 'LEFT' ? 'left' : contractSettings.banner_text_align === 'RIGHT' ? 'right' : 'center';
-        const bannerBold = contractSettings.banner_bold !== undefined ? Boolean(contractSettings.banner_bold) : true;
-        const bannerItalic = Boolean(contractSettings.banner_italic);
-        const bannerUnderline = Boolean(contractSettings.banner_underline);
-        const bannerColor = contractSettings.banner_color || '#0f172a';
-        const bannerFontSize = contractSettings.banner_font_size === 'LARGE' ? '11px' : contractSettings.banner_font_size === 'MEDIUM' ? '10px' : '9px';
-
+        const originUrl = window.location.origin;
         const resolveImgUrl = (url) => {
           if (!url) return '';
           if (url.startsWith('data:') || url.startsWith('http')) return url;
-          return `${window.location.origin}${url.startsWith('/') ? '' : '/'}${url}`;
+          return `${originUrl}${url.startsWith('/') ? '' : '/'}${url}`;
         };
 
-        let topBannerHtml = '';
-        if ((bannerMode === 'IMAGE' || bannerMode === 'BOTH') && bannerImgSrc) {
-          topBannerHtml = `
-            <div class="rdo-top-bar" style="padding: 2.5px 6px; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;">
-              <img src="${resolveImgUrl(bannerImgSrc)}" class="rdo-banner-img" alt="Banner" style="max-height: 12mm; max-width: 100%; object-fit: contain; display: block; margin: 0 auto;" />
-              ${!hasDocTitle ? '<div class="rdo-doc-title">DIÁRIO DE OBRAS</div>' : ''}
-            </div>
-          `;
-        } else {
-          const formattedTextLines = String(bannerText)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/\n/g, '<br/>');
+        const printFontSize =
+          bannerFontSize === 'SMALL' ? '11px' : bannerFontSize === 'LARGE' ? '16px' : '13px';
 
-          topBannerHtml = `
-            <div class="rdo-top-bar" style="padding: 3px 6px; text-align: ${bannerAlign}; display: flex; flex-direction: column; align-items: ${bannerAlign === 'left' ? 'flex-start' : bannerAlign === 'right' ? 'flex-end' : 'center'}; justify-content: center; gap: 1.5px;">
-              <div style="font-size: ${bannerFontSize}; font-weight: ${bannerBold ? 'bold' : 'normal'}; font-style: ${bannerItalic ? 'italic' : 'normal'}; text-decoration: ${bannerUnderline ? 'underline' : 'none'}; color: ${bannerColor}; line-height: 1.25; text-transform: uppercase;">
-                ${formattedTextLines}
-              </div>
-              ${!hasDocTitle ? '<div class="rdo-doc-title">DIÁRIO DE OBRAS</div>' : ''}
-            </div>
-          `;
-        }
+        const bannerContentHtml = `
+          ${
+            showBannerImg
+              ? `<img src="${resolveImgUrl(bannerImageUrl)}" class="rdo-banner-img" alt="Banner" />`
+              : ''
+          }
+          ${
+            showBannerTxt && bannerText
+              ? `<div class="rdo-banner-text" style="
+                  font-size: ${printFontSize};
+                  font-weight: ${bannerBold ? '700' : '400'};
+                  font-style: ${bannerItalic ? 'italic' : 'normal'};
+                  text-decoration: ${bannerUnderline ? 'underline' : 'none'};
+                  color: ${bannerColor};
+                  text-align: ${bannerAlignCss};
+                ">${String(bannerText)
+                  .replace(/&/g, '&amp;')
+                  .replace(/</g, '&lt;')
+                  .replace(/>/g, '&gt;')
+                  .replace(/\n/g, '<br/>')}</div>`
+              : ''
+          }
+        `;
 
         fullHtmlPages += `
           <div class="sheet">
-            <!-- Header Banner (Configurado no Módulo 8) -->
-            ${topBannerHtml}
+            <!-- Header Banner (Same criterion as Photo Report / Module 8) -->
+            <div class="rdo-top-bar" style="text-align: ${bannerAlignCss};">
+              ${bannerContentHtml}
+            </div>
 
             <!-- Top Identification Grid -->
             <div class="grid-ident">
@@ -1160,24 +1146,27 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
             }
 
             .rdo-top-bar {
+              display: flex;
+              flex-direction: column;
+              justify-content: center;
               border: 1px solid #000;
+              padding: 4px 8px;
               margin-bottom: 2px;
-              min-height: 10mm;
-              max-height: 16mm;
-              box-sizing: border-box;
+              min-height: 12mm;
+              max-height: 22mm;
+              overflow: hidden;
             }
             .rdo-banner-img {
-              max-height: 12mm;
+              max-height: 16mm;
               max-width: 100%;
               object-fit: contain;
+              margin: 0 auto;
+              display: block;
             }
-            .rdo-doc-title {
-              font-size: 11px;
-              font-weight: 900;
-              letter-spacing: 1.5px;
-              color: #0f172a;
-              text-align: center;
-              line-height: 1.1;
+            .rdo-banner-text {
+              line-height: 1.25;
+              white-space: pre-line;
+              width: 100%;
             }
 
             .grid-ident {
@@ -2107,58 +2096,36 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
         <div className="bg-slate-100 p-4 sm:p-6 rounded-2xl border border-slate-300 flex justify-center">
           <div className="bg-white w-full max-w-[850px] p-6 sm:p-8 rounded-xl shadow-md border border-slate-300 space-y-3 font-sans text-xs">
             
-            {/* Header: Dynamic Banner from Module 8 (Settings) */}
-            <div className="border border-slate-900 p-2.5 bg-white flex flex-col justify-center min-h-[58px]">
-              {((contractSettings.banner_mode === 'IMAGE' || contractSettings.banner_mode === 'BOTH') && contractSettings.banner_image_url) ? (
-                <div className="text-center space-y-1">
-                  <img
-                    src={contractSettings.banner_image_url}
-                    alt="Banner do Relatório"
-                    className="max-h-12 object-contain mx-auto"
-                  />
-                  {!hasDocTitle && (
-                    <div className="font-black text-xs sm:text-sm tracking-widest text-slate-900 uppercase pt-0.5 text-center">
-                      DIÁRIO DE OBRAS
-                    </div>
-                  )}
-                </div>
-              ) : (
+            {/* Header: Banner Customizável (Configurado no Módulo 8 - mesmo critério do Relatório Fotográfico) */}
+            <div
+              className="border border-slate-900 p-3 flex flex-col justify-center gap-1.5 min-h-[56px]"
+              style={{ textAlign: bannerAlignCss }}
+            >
+              {showBannerImg && (
+                <img
+                  src={bannerImageUrl}
+                  alt="Banner do Relatório"
+                  className="max-h-16 max-w-full object-contain mx-auto"
+                />
+              )}
+              {showBannerTxt && bannerText && (
                 <div
-                  className="flex flex-col justify-center space-y-1"
                   style={{
-                    textAlign:
-                      contractSettings.banner_text_align === 'LEFT'
-                        ? 'left'
-                        : contractSettings.banner_text_align === 'RIGHT'
-                        ? 'right'
-                        : 'center'
+                    fontSize:
+                      bannerFontSize === 'SMALL'
+                        ? '12px'
+                        : bannerFontSize === 'LARGE'
+                        ? '18px'
+                        : '14px',
+                    fontWeight: bannerBold ? '700' : '400',
+                    fontStyle: bannerItalic ? 'italic' : 'normal',
+                    textDecoration: bannerUnderline ? 'underline' : 'none',
+                    color: bannerColor,
+                    whiteSpace: 'pre-line',
+                    textAlign: bannerAlignCss
                   }}
                 >
-                  <div
-                    style={{
-                      fontSize:
-                        contractSettings.banner_font_size === 'LARGE'
-                          ? '14px'
-                          : contractSettings.banner_font_size === 'MEDIUM'
-                          ? '12px'
-                          : '11px',
-                      fontWeight: contractSettings.banner_bold ? '700' : '400',
-                      fontStyle: contractSettings.banner_italic ? 'italic' : 'normal',
-                      textDecoration: contractSettings.banner_underline ? 'underline' : 'none',
-                      color: contractSettings.banner_color || '#0f172a',
-                      whiteSpace: 'pre-line',
-                      textTransform: 'uppercase',
-                      lineHeight: '1.25'
-                    }}
-                  >
-                    {contractSettings.banner_text ||
-                      'AXIS OBRA ENGENHARIA E CONSTRUÇÕES LTDA\nSUPERINTENDÊNCIA DE ENGENHARIA E CONTROLE DE QUALIDADE'}
-                  </div>
-                  {!hasDocTitle && (
-                    <div className="font-black text-xs sm:text-sm tracking-widest text-slate-900 uppercase pt-0.5 text-center">
-                      DIÁRIO DE OBRAS
-                    </div>
-                  )}
+                  {bannerText}
                 </div>
               )}
             </div>

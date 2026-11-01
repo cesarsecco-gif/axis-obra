@@ -13,7 +13,14 @@ import {
   Shield,
   Upload,
   Sparkles,
-  Info
+  Info,
+  Bold,
+  Italic,
+  Underline,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  Type
 } from 'lucide-react';
 import { apiRequest } from '../api';
 
@@ -484,55 +491,39 @@ export default function SettingsView({ projects, selectedProjectId, currentUser 
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Modo do Banner Superior
+                  Modo do Banner Superior (Aplicado no RDO e no Relatório Fotográfico)
                 </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setSettingsForm({ ...settingsForm, banner_mode: 'TEXT' })}
-                    className={`px-3 py-2 rounded-lg text-xs font-bold border transition ${
-                      settingsForm.banner_mode === 'TEXT'
-                        ? 'bg-amber-500 text-slate-950 border-amber-500'
-                        : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                    }`}
-                  >
-                    Caixa de Texto Formatado
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSettingsForm({ ...settingsForm, banner_mode: 'IMAGE' })}
-                    className={`px-3 py-2 rounded-lg text-xs font-bold border transition ${
-                      settingsForm.banner_mode === 'IMAGE'
-                        ? 'bg-amber-500 text-slate-950 border-amber-500'
-                        : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                    }`}
-                  >
-                    Imagem / Logo Banner
-                  </button>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { id: 'TEXT', label: 'Caixa de Texto Formatado' },
+                    { id: 'IMAGE', label: 'Imagem / Logo Banner' },
+                    { id: 'BOTH', label: 'Imagem + Texto' }
+                  ].map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => setSettingsForm({ ...settingsForm, banner_mode: m.id })}
+                      className={`px-3 py-2 rounded-lg text-xs font-bold border transition ${
+                        settingsForm.banner_mode === m.id
+                          ? 'bg-amber-500 text-slate-950 border-amber-500'
+                          : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                      }`}
+                    >
+                      {m.label}
+                    </button>
+                  ))}
                 </div>
               </div>
 
-              {settingsForm.banner_mode === 'TEXT' ? (
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Texto do Banner
-                  </label>
-                  <textarea
-                    rows={3}
-                    value={settingsForm.banner_text || ''}
-                    onChange={(e) => setSettingsForm({ ...settingsForm, banner_text: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs font-medium"
-                  />
-                </div>
-              ) : (
-                <div className="space-y-3">
+              {(settingsForm.banner_mode === 'IMAGE' || settingsForm.banner_mode === 'BOTH') && (
+                <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
                   <label className="block text-xs font-bold text-slate-700">
-                    Imagem / Logo do Banner
+                    Importar Imagem do Banner Customizado (RDO & Relatórios):
                   </label>
                   <div className="flex flex-wrap items-center gap-3">
                     <label className="cursor-pointer inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold transition">
                       <Upload className="w-4 h-4 text-amber-400" />
-                      Selecionar Imagem do Banner...
+                      Selecionar Imagem (PNG, JPG, SVG)
                       <input
                         type="file"
                         accept="image/*"
@@ -543,8 +534,7 @@ export default function SettingsView({ projects, selectedProjectId, currentUser 
                           reader.onload = () => {
                             setSettingsForm((prev) => ({
                               ...prev,
-                              banner_image_base64: reader.result,
-                              banner_image_url: reader.result
+                              banner_image_base64: reader.result
                             }));
                           };
                           reader.readAsDataURL(file);
@@ -552,25 +542,141 @@ export default function SettingsView({ projects, selectedProjectId, currentUser 
                         className="hidden"
                       />
                     </label>
-                    <span className="text-xs text-slate-500">ou informe o link/caminho:</span>
+                    {(settingsForm.banner_image_base64 || settingsForm.banner_image_url) && (
+                      <div className="flex items-center gap-2 bg-white p-1.5 rounded-lg border border-slate-200">
+                        <img
+                          src={settingsForm.banner_image_base64 || settingsForm.banner_image_url}
+                          alt="Banner"
+                          className="h-10 object-contain"
+                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setSettingsForm({
+                              ...settingsForm,
+                              banner_image_url: '',
+                              banner_image_base64: ''
+                            })
+                          }
+                          className="text-xs text-rose-600 hover:underline font-semibold px-1"
+                        >
+                          Remover
+                        </button>
+                      </div>
+                    )}
                   </div>
-                  <input
-                    type="text"
-                    value={settingsForm.banner_image_url || ''}
-                    onChange={(e) => setSettingsForm({ ...settingsForm, banner_image_url: e.target.value })}
-                    placeholder="Ex: /uploads/meu-banner.png ou https://..."
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
-                  />
-                  {settingsForm.banner_image_url && (
-                    <div className="p-3 border border-slate-200 rounded-lg bg-slate-50 text-center">
-                      <span className="text-[11px] font-bold text-slate-500 block mb-1">Prévia do Banner Atual:</span>
-                      <img
-                        src={settingsForm.banner_image_url}
-                        alt="Prévia Banner"
-                        className="max-h-16 object-contain mx-auto border border-slate-200 rounded p-1 bg-white"
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                      Ou informe a URL / Caminho da Imagem:
+                    </label>
+                    <input
+                      type="text"
+                      value={settingsForm.banner_image_url || ''}
+                      onChange={(e) => setSettingsForm({ ...settingsForm, banner_image_url: e.target.value })}
+                      placeholder="Ex: /uploads/meu-banner.png ou https://..."
+                      className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs bg-white"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {(settingsForm.banner_mode === 'TEXT' || settingsForm.banner_mode === 'BOTH') && (
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-bold text-slate-700">
+                    Texto do Banner
+                  </label>
+                  <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-100 p-2 rounded-t-xl border border-b-0 border-slate-300">
+                    <div className="flex items-center gap-1">
+                      <span className="text-[11px] font-bold text-slate-600 px-1.5 flex items-center gap-1">
+                        <Type className="w-3.5 h-3.5" /> Formatação:
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setSettingsForm({ ...settingsForm, banner_bold: settingsForm.banner_bold ? 0 : 1 })}
+                        className={`p-1.5 rounded ${
+                          settingsForm.banner_bold ? 'bg-slate-900 text-amber-400' : 'hover:bg-slate-200 text-slate-700'
+                        }`}
+                        title="Negrito"
+                      >
+                        <Bold className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSettingsForm({ ...settingsForm, banner_italic: settingsForm.banner_italic ? 0 : 1 })}
+                        className={`p-1.5 rounded ${
+                          settingsForm.banner_italic ? 'bg-slate-900 text-amber-400' : 'hover:bg-slate-200 text-slate-700'
+                        }`}
+                        title="Itálico"
+                      >
+                        <Italic className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSettingsForm({ ...settingsForm, banner_underline: settingsForm.banner_underline ? 0 : 1 })}
+                        className={`p-1.5 rounded ${
+                          settingsForm.banner_underline ? 'bg-slate-900 text-amber-400' : 'hover:bg-slate-200 text-slate-700'
+                        }`}
+                        title="Sublinhado"
+                      >
+                        <Underline className="w-3.5 h-3.5" />
+                      </button>
+                      <div className="h-4 w-px bg-slate-300 mx-1" />
+                      {['LEFT', 'CENTER', 'RIGHT'].map((al) => {
+                        const Icon = al === 'LEFT' ? AlignLeft : al === 'RIGHT' ? AlignRight : AlignCenter;
+                        return (
+                          <button
+                            key={al}
+                            type="button"
+                            onClick={() => setSettingsForm({ ...settingsForm, banner_text_align: al })}
+                            className={`p-1.5 rounded ${
+                              (settingsForm.banner_text_align || 'CENTER') === al
+                                ? 'bg-slate-900 text-amber-400'
+                                : 'hover:bg-slate-200 text-slate-700'
+                            }`}
+                          >
+                            <Icon className="w-3.5 h-3.5" />
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={settingsForm.banner_font_size || 'MEDIUM'}
+                        onChange={(e) => setSettingsForm({ ...settingsForm, banner_font_size: e.target.value })}
+                        className="px-2 py-1 rounded border border-slate-300 bg-white text-[11px] font-bold text-slate-700"
+                      >
+                        <option value="SMALL">Fonte Pequena</option>
+                        <option value="MEDIUM">Fonte Média</option>
+                        <option value="LARGE">Fonte Grande</option>
+                      </select>
+                      <input
+                        type="color"
+                        value={settingsForm.banner_color || '#0f172a'}
+                        onChange={(e) => setSettingsForm({ ...settingsForm, banner_color: e.target.value })}
+                        className="w-6 h-6 rounded border border-slate-300 cursor-pointer"
+                        title="Cor do texto"
                       />
                     </div>
-                  )}
+                  </div>
+                  <textarea
+                    rows={3}
+                    value={settingsForm.banner_text || ''}
+                    onChange={(e) => setSettingsForm({ ...settingsForm, banner_text: e.target.value })}
+                    style={{
+                      textAlign:
+                        settingsForm.banner_text_align === 'LEFT'
+                          ? 'left'
+                          : settingsForm.banner_text_align === 'RIGHT'
+                          ? 'right'
+                          : 'center',
+                      fontWeight: settingsForm.banner_bold ? '700' : '400',
+                      fontStyle: settingsForm.banner_italic ? 'italic' : 'normal',
+                      textDecoration: settingsForm.banner_underline ? 'underline' : 'none',
+                      color: settingsForm.banner_color || '#0f172a'
+                    }}
+                    className="w-full px-3 py-2 rounded-b-xl border border-slate-300 text-xs"
+                  />
                 </div>
               )}
             </div>
