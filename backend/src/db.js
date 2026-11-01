@@ -191,13 +191,61 @@ function initDatabase() {
       show_empty_placeholders INTEGER DEFAULT 1,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS rdo_records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id INTEGER NOT NULL,
+      user_id INTEGER,
+      folio_number INTEGER NOT NULL,
+      rdo_date TEXT NOT NULL,
+      weather_condition TEXT DEFAULT 'BOM',
+      work_code TEXT DEFAULT '',
+      work_force_count INTEGER DEFAULT 0,
+      work_force_sufficient INTEGER DEFAULT 1,
+      representative_engineer TEXT DEFAULT '',
+      representative_present INTEGER DEFAULT 1,
+      contractor_notes TEXT DEFAULT '',
+      supervisor_notes TEXT DEFAULT 'DER/PR SUPERINTENDÊNCIA REGIONAL NOROESTE',
+      fiscal_notes TEXT DEFAULT '',
+      services_developed TEXT DEFAULT '[]',
+      status TEXT DEFAULT 'EM_ANDAMENTO',
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+      UNIQUE (project_id, rdo_date)
+    );
   `);
 
   ensureSamplePhotos();
   ensurePluviometryColumns();
+  ensureReportSettingsColumns();
   seedOccurrenceParamsIfEmpty();
   seedReportSettingsIfEmpty();
   seedIfEmpty();
+  seedRdoIfEmpty();
+}
+
+function ensureReportSettingsColumns() {
+  const cols = db.prepare("PRAGMA table_info('report_settings')").all().map((c) => c.name);
+  const additions = [
+    ['contract_number', "TEXT DEFAULT 'CO141/2025 - DT'"],
+    ['contractor_company', "TEXT DEFAULT 'Consórcio Rodovia PR-317 Iguaraçu Maringá'"],
+    ['supervisor_company', "TEXT DEFAULT 'Iguatemi Consultoria e Serviços de Engenharia LTDA.'"],
+    ['client_name', "TEXT DEFAULT 'DER/PR - Governo do Estado do Paraná'"],
+    ['regional_superintendency', "TEXT DEFAULT 'DER/PR SUPERINTENDÊNCIA REGIONAL NOROESTE'"],
+    ['contractor_manager', "TEXT DEFAULT 'DANIELLE NARDINO'"],
+    ['contractor_representative', "TEXT DEFAULT 'DANIELLE NARDINO'"],
+    ['supervisor_engineer', "TEXT DEFAULT 'João Carlos Deríssio'"],
+    ['fiscal_engineer', "TEXT DEFAULT 'Alisson'"],
+    ['banner_logo_left_url', "TEXT DEFAULT ''"],
+    ['banner_logo_right_url', "TEXT DEFAULT ''"]
+  ];
+  for (const [colName, colDef] of additions) {
+    if (!cols.includes(colName)) {
+      db.exec(`ALTER TABLE report_settings ADD COLUMN ${colName} ${colDef};`);
+    }
+  }
 }
 
 function ensurePluviometryColumns() {
@@ -694,6 +742,262 @@ function seedIfEmpty() {
   insertPluviometry.run(proj3Id, eng1Id, '2026-10-29', 'NUBLADO', 'CHUVA_FRACA', 'SEM_EXPEDIENTE', 6.5, 'SEM_IMPACTO', 0, 17, 24, 'Obra predominantemente interna, sem impacto no cronograma.');
 
   console.log('Seed inicial do AXIS OBRA concluído com sucesso!');
+}
+
+function seedRdoIfEmpty() {
+  const countRow = db.prepare('SELECT COUNT(*) as total FROM rdo_records').get();
+  if (countRow && countRow.total > 0) return;
+
+  const proj = db.prepare("SELECT id FROM projects WHERE code = 'OBR-2026-001'").get() || db.prepare('SELECT id FROM projects LIMIT 1').get();
+  if (!proj) return;
+  const admin = db.prepare('SELECT id FROM users LIMIT 1').get();
+
+  const insertRdo = db.prepare(`
+    INSERT INTO rdo_records (
+      project_id, user_id, folio_number, rdo_date, weather_condition, work_code,
+      work_force_count, work_force_sufficient, representative_engineer, representative_present,
+      contractor_notes, supervisor_notes, fiscal_notes, services_developed
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  const samples = [
+    {
+      folio: 1,
+      date: '2026-09-01',
+      weather: 'IMPRATICAVEL',
+      workForce: 320,
+      sufficient: 1,
+      rep: 'DANIELLE NARDINO',
+      present: 1,
+      contractorNotes: '',
+      supervisorNotes: 'DER/PR SUPERINTENDÊNCIA REGIONAL NOROESTE',
+      fiscalNotes: '',
+      services: [
+        'EXECUÇÃO DE BSTC Ø0,60',
+        'APLICAÇÃO DE FORMAS PARA CONCRETAGEM DO MURO C2',
+        'EXECUÇÃO DE ARMADURA PARA MURO C2',
+        'MURO C7 - COLOCAÇÃO DE TELA ELETROSOLDADA PARA PROJETADO',
+        'LANÇAMENTO DE MATERIAL PARA SUBBASE',
+        'PLANTIO DE GRAMA',
+        'MURO C7 - EXECUÇÃO DE DRENO LONGITUDINAL'
+      ]
+    },
+    {
+      folio: 2,
+      date: '2026-09-02',
+      weather: 'INSTAVEL',
+      workForce: 320,
+      sufficient: 1,
+      rep: 'DANIELLE NARDINO',
+      present: 1,
+      contractorNotes: '',
+      supervisorNotes: 'DER/PR SUPERINTENDÊNCIA REGIONAL NOROESTE',
+      fiscalNotes: '',
+      services: [
+        'EXECUÇÃO DE BSTC RAMO 600 - IGUARAÇÚ',
+        'ESCAVAÇÃO RAMO 600 - IGUARAÇÚ',
+        'EXECUÇÃO DE TELA ELETROSOLDADA PARA PROJETADO MUDO C7',
+        'EXECUÇÃO DE DRENO LONGITUDINAL',
+        'APLICAÇÃO DE FORMAS PARA MURO C2',
+        'EXECUÇÃO DE TIRANTES DE REFORÇO PARA MURO C7',
+        'PLANTIO DE GRAMA',
+        'INJEÇÃO DE TIRANTES MURO C2',
+        'LANÇAMENTO DE MATERIAL PARA SUB-BASE',
+        'COMPACTAÇÃO DE SUB-BASE'
+      ]
+    },
+    {
+      folio: 3,
+      date: '2026-09-03',
+      weather: 'INSTAVEL',
+      workForce: 122,
+      sufficient: 1,
+      rep: 'DANIELLE NARDINO',
+      present: 1,
+      contractorNotes: '',
+      supervisorNotes: 'DER/PR SUPERINTENDÊNCIA REGIONAL NOROESTE',
+      fiscalNotes: '',
+      services: [
+        'LANÇAMENTO DE CBUQ FAIXA C',
+        'APLICAÇÃO DE TELA ELETROSOLDADA PARA PROJETADO MURO C7',
+        'DESFORMA DO MUTO C7',
+        'EXECUÇÃO DE CANALETA PARA DRENAGEM',
+        'PLANTIO DE GRAMA',
+        'LANÇAMENTO DE BGMC PARA BASE',
+        'EXECUÇÃO DE DRENAGEM CANAL CRC',
+        'TERRAPLENAGEM TRECHO IGUARAÇU'
+      ]
+    },
+    {
+      folio: 4,
+      date: '2026-09-04',
+      weather: 'INSTAVEL',
+      workForce: 310,
+      sufficient: 1,
+      rep: 'DANIELLE NARDINO',
+      present: 1,
+      contractorNotes: '',
+      supervisorNotes: 'DER/PR SUPERINTENDÊNCIA REGIONAL NOROESTE',
+      fiscalNotes: '',
+      services: [
+        'TERRAPLENAGEM TREVO IGUARAÇÚ',
+        'APLICAÇÃO DE RACHÃO PARA REFORÇO DO SUBLEITO',
+        'APLICAÇÃO DE BGMC PARA BASE',
+        'DESCORMA MURO C2',
+        'MURO C7 - APLICAÇÃO DE CONCRETO PROJETADO',
+        'EXECUÇÃO DE TSD NA DUPLICAÇÃO'
+      ]
+    },
+    {
+      folio: 5,
+      date: '2026-09-05',
+      weather: 'CHUVOSO',
+      workForce: 180,
+      sufficient: 1,
+      rep: 'DANIELLE NARDINO',
+      present: 1,
+      contractorNotes: '',
+      supervisorNotes: 'DER/PR SUPERINTENDÊNCIA REGIONAL NOROESTE',
+      fiscalNotes: '',
+      services: [
+        'PERFUTAÇÃO DE TIRANTES MURO C2',
+        'EXECUÇÃO DE DRENAGEM CRC',
+        'INDICATIVO DE CHUVA - 7,4MM',
+        'DESFORMA MURO C2'
+      ]
+    },
+    {
+      folio: 6,
+      date: '2026-09-06',
+      weather: 'CHUVOSO',
+      workForce: 45,
+      sufficient: 1,
+      rep: 'DANIELLE NARDINO',
+      present: 1,
+      contractorNotes: 'IMPRATICÁVEL PELA CHUVA DO DIA ANTEIOR',
+      supervisorNotes: 'DER/PR SUPERINTENDÊNCIA REGIONAL NOROESTE',
+      fiscalNotes: '',
+      services: []
+    },
+    {
+      folio: 7,
+      date: '2026-09-07',
+      weather: 'IMPRATICAVEL',
+      workForce: 50,
+      sufficient: 1,
+      rep: 'DANIELLE NARDINO',
+      present: 1,
+      contractorNotes: 'IMPRATICÁVEL PELA CHUVA DO DIA ANTERIOR',
+      supervisorNotes: 'DER/PR SUPERINTENDÊNCIA REGIONAL NOROESTE',
+      fiscalNotes: '',
+      services: []
+    },
+    {
+      folio: 8,
+      date: '2026-09-08',
+      weather: 'INSTAVEL',
+      workForce: 295,
+      sufficient: 1,
+      rep: 'DANIELLE NARDINO',
+      present: 1,
+      contractorNotes: '',
+      supervisorNotes: 'DER/PR SUPERINTENDÊNCIA REGIONAL NOROESTE',
+      fiscalNotes: '',
+      services: [
+        'EXECUÇÃO DE ARMADURA MURO C7',
+        'IMPLANTAÇÃO DE DEFESA METÁLICA',
+        'TERRAPLENAGEM, ESCAVAÇÃO DE MAT 1 CAT',
+        'APLICAÇÃO DE CBUQ FX C',
+        'APLICAÇÃO DE REFORÇO EM RACHÃO',
+        'EXECUÇÃO DE DRENAGEM SUPERFICIAL',
+        'LANÇAMENTO DE BGMC PARA BASE',
+        'ASSENTAMENTO DE CANAL EM CONCRETO CRC',
+        'APLICAÇÃO DE CONCRETO PROJETADO'
+      ]
+    },
+    {
+      folio: 9,
+      date: '2026-09-09',
+      weather: 'BOM',
+      workForce: 330,
+      sufficient: 1,
+      rep: 'DANIELLE NARDINO',
+      present: 1,
+      contractorNotes: '',
+      supervisorNotes: 'DER/PR SUPERINTENDÊNCIA REGIONAL NOROESTE',
+      fiscalNotes: '',
+      services: [
+        'APLICAÇÃO DE RACHÃO PARA REFORÇO DO SUBLEITO',
+        'MURO C2 - PERGURAÇÃO DE TIRANTES PARA',
+        'MURO C2 - INSTALAÇÃO DE PAINEIS PARA CONCRETAGEM',
+        'MURO C2 - INSTALAÇÃO DE ARMADURA',
+        'COLOCAÇÃO DE TELA ELETROSOLDADA PARA MURO PROJETADO',
+        'MURO C7 - APLICAÇÃO DE CONCRETO PROJETADO',
+        'MURO C7 - APLICAÇÃO DE TELA ELETROSOLDADA PARA PROJETADO',
+        '1. MURO C7 - APLICAÇÃO DE TELA ELETROSOLDADA PARA PROJETADO 2. ESCAVAÇÃO DE MATERIAL DE 1 CAT',
+        'EXECUÇÃO DE DRENAGEM SUPERFICIAL',
+        'IMPLANTAÇÃO DE DEFESA METÁLICA',
+        'INSTALAÇÃO DE DEFENSA SEMI-MALEÁVEL'
+      ]
+    },
+    {
+      folio: 10,
+      date: '2026-09-10',
+      weather: 'CHUVOSO',
+      workForce: 160,
+      sufficient: 1,
+      rep: 'DANIELLE NARDINO',
+      present: 1,
+      contractorNotes: 'TRECHO AINDA APRESENTA IMPRATICABILIDADE PELAS CHUVAS',
+      supervisorNotes: 'DER/PR SUPERINTENDÊNCIA REGIONAL NOROESTE',
+      fiscalNotes: '',
+      services: [
+        'MURO C2 - PERGURAÇÃO PARA INSTALAÇÃO DE TIRANTES'
+      ]
+    },
+    {
+      folio: 11,
+      date: '2026-09-11',
+      weather: 'CHUVOSO',
+      workForce: 210,
+      sufficient: 1,
+      rep: 'DANIELLE NARDINO',
+      present: 1,
+      contractorNotes: '',
+      supervisorNotes: 'DER/PR SUPERINTENDÊNCIA REGIONAL NOROESTE',
+      fiscalNotes: '',
+      services: [
+        'APLICAÇÃO DE CBUQ FX C',
+        'MURO C7 - APLICAÇÃO DE TELA ELETROSOLDADA PARA PROJETADO',
+        'MURO C2 - INSTALAÇÃO DE PAINEIS PARA CONCRETAGEM',
+        'MURO C2 - PERGURAÇÃO PARA INSTALAÇÃO DE TIRANTES',
+        'APLICAÇÃO DE RACHÃO PARA REFORÇO DO SUBLEITO',
+        'ENLEIVAMENTO',
+        'ASSENTAMENTO DE MEIO-FIO',
+        'EXECUÇÃO DE DRENAGEM SUPERFICIAL',
+        'ASSENTAMENTO DE CANAL EM CONCRETO CRC'
+      ]
+    }
+  ];
+
+  samples.forEach((s) => {
+    insertRdo.run(
+      proj.id,
+      admin ? admin.id : null,
+      s.folio,
+      s.date,
+      s.weather,
+      'CO141/2025 - DT',
+      s.workForce,
+      s.sufficient,
+      s.rep,
+      s.present,
+      s.contractorNotes,
+      s.supervisorNotes,
+      s.fiscalNotes,
+      JSON.stringify(s.services)
+    );
+  });
 }
 
 module.exports = {

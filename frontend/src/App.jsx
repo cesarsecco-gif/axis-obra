@@ -2,11 +2,13 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   LayoutDashboard,
   Camera,
+  ClipboardList,
   AlertTriangle,
   HardHat,
   Wrench,
   Building2,
   CloudRain,
+  Settings,
   LogOut,
   UserCheck,
   Shield,
@@ -24,20 +26,24 @@ import {
 } from './api';
 import DashboardView from './components/DashboardView';
 import PhotosView from './components/PhotosView';
+import RdoView from './components/RdoView';
 import OccurrencesView from './components/OccurrencesView';
 import EmployeesView from './components/EmployeesView';
 import EquipmentsView from './components/EquipmentsView';
 import ProjectsUsersView from './components/ProjectsUsersView';
 import PluviometryView from './components/PluviometryView';
+import SettingsView from './components/SettingsView';
 
 const NAV_ITEMS = [
   { id: 'DASHBOARD', label: 'Painel Consolidado', icon: LayoutDashboard, badge: null },
   { id: 'PHOTOS', label: '1. Registro Fotográfico', icon: Camera, badge: 'Módulo 1' },
-  { id: 'OCCURRENCES', label: '2. Registro de Ocorrências', icon: AlertTriangle, badge: 'Módulo 2' },
-  { id: 'EMPLOYEES', label: '3. Cadastro de Funcionários', icon: HardHat, badge: 'Módulo 3' },
-  { id: 'EQUIPMENTS', label: '4. Cadastro de Equipamentos', icon: Wrench, badge: 'Módulo 4' },
-  { id: 'PROJECTS', label: '5. Obras por Usuário', icon: Building2, badge: 'Módulo 5' },
-  { id: 'PLUVIOMETRY', label: '6. Registro de Pluviometria', icon: CloudRain, badge: 'Módulo 6' }
+  { id: 'RDO', label: '2. Diário de Obras (RDO)', icon: ClipboardList, badge: 'Módulo 2' },
+  { id: 'OCCURRENCES', label: '3. Registro de Ocorrências', icon: AlertTriangle, badge: 'Módulo 3' },
+  { id: 'EMPLOYEES', label: '4. Cadastro de Funcionários', icon: HardHat, badge: 'Módulo 4' },
+  { id: 'EQUIPMENTS', label: '5. Cadastro de Equipamentos', icon: Wrench, badge: 'Módulo 5' },
+  { id: 'PROJECTS', label: '6. Obras por Usuário', icon: Building2, badge: 'Módulo 6' },
+  { id: 'PLUVIOMETRY', label: '7. Registro de Pluviometria', icon: CloudRain, badge: 'Módulo 7' },
+  { id: 'SETTINGS', label: '8. Configurações do Sistema', icon: Settings, badge: 'Ajustes' }
 ];
 
 export default function App() {
@@ -476,6 +482,14 @@ export default function App() {
             />
           )}
 
+          {activeNav === 'RDO' && (
+            <RdoView
+              projects={projects}
+              selectedProjectId={selectedProjectId}
+              currentUser={currentUser}
+            />
+          )}
+
           {activeNav === 'OCCURRENCES' && (
             <OccurrencesView
               projects={projects}
@@ -517,6 +531,14 @@ export default function App() {
               projects={projects}
               selectedProjectId={selectedProjectId}
               onRefreshDashboard={() => loadWorkspaceData()}
+            />
+          )}
+
+          {activeNav === 'SETTINGS' && (
+            <SettingsView
+              projects={projects}
+              selectedProjectId={selectedProjectId}
+              currentUser={currentUser}
             />
           )}
         </main>

@@ -2,6 +2,7 @@ import React from 'react';
 import {
   Building2,
   Camera,
+  ClipboardList,
   AlertTriangle,
   HardHat,
   Wrench,
@@ -30,23 +31,23 @@ export default function DashboardView({
 
   const kpis = [
     {
-      title: '5. Obras do Usuário',
-      value: dashboard.projectsCount,
-      subtitle: currentUser?.role === 'ADMIN' ? 'Acesso Total (Admin)' : 'Obras Vinculadas ao Perfil',
-      icon: Building2,
-      color: 'bg-amber-500/10 text-amber-600',
-      nav: 'PROJECTS'
-    },
-    {
       title: '1. Registros Fotográficos',
       value: dashboard.photosCount,
       subtitle: 'Fotos técnicas de evolução',
       icon: Camera,
-      color: 'bg-emerald-500/10 text-emerald-600',
+      color: 'bg-amber-500/10 text-amber-600',
       nav: 'PHOTOS'
     },
     {
-      title: '2. Ocorrências Abertas',
+      title: '2. Diário de Obras (RDO)',
+      value: 'Padrão DER/PR',
+      subtitle: 'Sincronizado com Fotos & Clima',
+      icon: ClipboardList,
+      color: 'bg-emerald-500/10 text-emerald-600',
+      nav: 'RDO'
+    },
+    {
+      title: '3. Ocorrências Abertas',
       value: dashboard.openOccurrencesCount,
       subtitle: `${dashboard.criticalOccurrencesCount} de severidade alta/crítica`,
       icon: AlertTriangle,
@@ -54,7 +55,7 @@ export default function DashboardView({
       nav: 'OCCURRENCES'
     },
     {
-      title: '3. Efetivo de Funcionários',
+      title: '4. Efetivo de Funcionários',
       value: `${dashboard.activeEmployeesCount} / ${dashboard.employeesCount}`,
       subtitle: 'Colaboradores ativos em campo',
       icon: HardHat,
@@ -62,7 +63,7 @@ export default function DashboardView({
       nav: 'EMPLOYEES'
     },
     {
-      title: '4. Parque de Equipamentos',
+      title: '5. Parque de Equipamentos',
       value: `${dashboard.operationalEquipmentsCount} / ${dashboard.equipmentsCount}`,
       subtitle: 'Máquinas em operação',
       icon: Wrench,
@@ -70,7 +71,15 @@ export default function DashboardView({
       nav: 'EQUIPMENTS'
     },
     {
-      title: '6. Índice Pluviométrico',
+      title: '6. Obras do Usuário',
+      value: dashboard.projectsCount,
+      subtitle: currentUser?.role === 'ADMIN' ? 'Acesso Total (Admin)' : 'Obras Vinculadas ao Perfil',
+      icon: Building2,
+      color: 'bg-blue-500/10 text-blue-600',
+      nav: 'PROJECTS'
+    },
+    {
+      title: '7. Índice Pluviométrico',
       value: `${dashboard.totalRainfallMm} mm`,
       subtitle: `${dashboard.totalHoursLostRain}h paralisadas por chuva`,
       icon: CloudRain,

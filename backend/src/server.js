@@ -969,7 +969,18 @@ app.put('/api/report-settings', authenticate, upload.single('banner_file'), (req
     subheader_align,
     subheader_bold,
     footer_text,
-    show_empty_placeholders
+    show_empty_placeholders,
+    contract_number,
+    contractor_company,
+    supervisor_company,
+    client_name,
+    regional_superintendency,
+    contractor_manager,
+    contractor_representative,
+    supervisor_engineer,
+    fiscal_engineer,
+    banner_logo_left_url,
+    banner_logo_right_url
   } = req.body;
 
   let finalBannerUrl =
@@ -1008,6 +1019,17 @@ app.put('/api/report-settings', authenticate, upload.single('banner_file'), (req
         subheader_bold = ?,
         footer_text = ?,
         show_empty_placeholders = ?,
+        contract_number = ?,
+        contractor_company = ?,
+        supervisor_company = ?,
+        client_name = ?,
+        regional_superintendency = ?,
+        contractor_manager = ?,
+        contractor_representative = ?,
+        supervisor_engineer = ?,
+        fiscal_engineer = ?,
+        banner_logo_left_url = ?,
+        banner_logo_right_url = ?,
         updated_at = CURRENT_TIMESTAMP
     WHERE id = 1
   `).run(
@@ -1026,7 +1048,18 @@ app.put('/api/report-settings', authenticate, upload.single('banner_file'), (req
     subheader_align || existing.subheader_align || 'CENTER',
     subheader_bold !== undefined ? (subheader_bold ? 1 : 0) : existing.subheader_bold,
     footer_text !== undefined ? footer_text : existing.footer_text,
-    show_empty_placeholders !== undefined ? (show_empty_placeholders ? 1 : 0) : existing.show_empty_placeholders
+    show_empty_placeholders !== undefined ? (show_empty_placeholders ? 1 : 0) : existing.show_empty_placeholders,
+    contract_number !== undefined ? contract_number : existing.contract_number,
+    contractor_company !== undefined ? contractor_company : existing.contractor_company,
+    supervisor_company !== undefined ? supervisor_company : existing.supervisor_company,
+    client_name !== undefined ? client_name : existing.client_name,
+    regional_superintendency !== undefined ? regional_superintendency : existing.regional_superintendency,
+    contractor_manager !== undefined ? contractor_manager : existing.contractor_manager,
+    contractor_representative !== undefined ? contractor_representative : existing.contractor_representative,
+    supervisor_engineer !== undefined ? supervisor_engineer : existing.supervisor_engineer,
+    fiscal_engineer !== undefined ? fiscal_engineer : existing.fiscal_engineer,
+    banner_logo_left_url !== undefined ? banner_logo_left_url : existing.banner_logo_left_url,
+    banner_logo_right_url !== undefined ? banner_logo_right_url : existing.banner_logo_right_url
   );
 
   const updated = db.prepare('SELECT * FROM report_settings WHERE id = 1').get();
@@ -1496,6 +1529,264 @@ app.delete('/api/occurrences/:id', authenticate, (req, res) => {
   }
 
   db.prepare('DELETE FROM occurrences WHERE id = ?').run(occId);
+  res.json({ success: true });
+});
+
+// ============================================================================
+// RDO - REGISTRO DIÁRIO DE OBRAS (MÓDULO 2)
+// ============================================================================
+
+app.get('/api/rdo', authenticate, (req, res) => {
+  const { projectId, month, year, date } = req.query;
+  const accessible = req.accessibleProjectIds;
+  if (accessible.length === 0) return res.json([]);
+
+  let targetIds = accessible;
+  if (projectId && projectId !== 'ALL') {
+    const pid = Number(projectId);
+    if (!canUserAccessProject(req.user, pid)) {
+      return res.status(403).json({ error: 'Sem acesso a esta obra.' });
+    }
+    targetIds = [pid];
+  }
+
+  const placeholders = targetIds.map(() => '?').join(',');
+  let query = `
+    SELECT r.*, p.name as project_name, p.code as project_code, u.name as author_name
+    FROM rdo_records r
+    JOIN projects p ON p.id = r.project_id
+    LEFT JOIN users u ON u.id = r.user_id
+    WHERE r.project_id IN (${placeholders})
+  `;
+  const params = [...targetIds];
+
+  if (date) {
+    query += ' AND r.rdo_date = ?';
+    params.push(date);
+  } else {
+    if (year && year !== 'ALL') {
+      query += " AND strftime('%Y', r.rdo_date) = ?";
+      params.push(String(year));
+    }
+    if (month && month !== 'ALL') {
+      query += " AND strftime('%m', r.rdo_date) = ?";
+      params.push(String(month).padStart(2, '0'));
+    }
+  }
+
+  query += ' ORDER BY r.rdo_date DESC, r.folio_number DESC';
+  const rows = db.prepare(query).all(...params);
+  res.json(rows);
+});
+
+app.get('/api/rdo/by-date', authenticate, (req, res) => {
+  const { projectId, date } = req.query;
+  if (!projectId || !date) {
+    return res.status(400).json({ error: 'Informe a obra e a data do RDO.' });
+  }
+
+  const pid = Number(projectId);
+  if (!canUserAccessProject(req.user, pid)) {
+    return res.status(403).json({ error: 'Sem acesso a esta obra.' });
+  }
+
+  const existing = db
+    .prepare(`
+      SELECT r.*, p.name as project_name, p.code as project_code
+      FROM rdo_records r
+      JOIN projects p ON p.id = r.project_id
+      WHERE r.project_id = ? AND r.rdo_date = ?
+    `)
+    .get(pid, date);
+
+  const photos = db
+    .prepare('SELECT id, title, description, weather_condition FROM photos WHERE project_id = ? AND taken_at = ? ORDER BY id ASC')
+    .all(pid, date);
+
+  const pluv = db
+    .prepare('SELECT * FROM pluviometry WHERE project_id = ? AND record_date = ?')
+    .get(pid, date);
+
+  const settings = db.prepare('SELECT * FROM report_settings WHERE id = 1').get() || {};
+
+  if (existing) {
+    return res.json({
+      ...existing,
+      photos_count: photos.length,
+      available_photos: photos,
+      pluviometry: pluv || null,
+      settings
+    });
+  }
+
+  // Calculate intelligent weather condition from pluviometry
+  let autoWeather = 'BOM';
+  if (pluv) {
+    if (
+      pluv.work_impact === 'PARALISACAO_TOTAL' ||
+      Number(pluv.rainfall_mm) >= 30 ||
+      pluv.afternoon_weather === 'IMPRATICAVEL'
+    ) {
+      autoWeather = 'IMPRATICAVEL';
+    } else if (
+      Number(pluv.rainfall_mm) > 0 ||
+      String(pluv.morning_weather).includes('CHUVA') ||
+      String(pluv.afternoon_weather).includes('CHUVA')
+    ) {
+      autoWeather = 'CHUVOSO';
+    } else if (
+      pluv.morning_weather === 'NUBLADO' ||
+      pluv.afternoon_weather === 'NUBLADO'
+    ) {
+      autoWeather = 'INSTAVEL';
+    } else {
+      autoWeather = 'BOM';
+    }
+  }
+
+  // Automatic services from photos of that day
+  const autoServices = photos.map((p) => p.title.trim()).filter(Boolean);
+
+  const maxFolio = db.prepare('SELECT MAX(folio_number) as maxF FROM rdo_records WHERE project_id = ?').get(pid);
+  const nextFolio = (maxFolio?.maxF || 0) + 1;
+  const project = db.prepare('SELECT id, code, name FROM projects WHERE id = ?').get(pid);
+
+  res.json({
+    id: null,
+    project_id: pid,
+    project_code: project?.code || '',
+    project_name: project?.name || '',
+    folio_number: nextFolio,
+    rdo_date: date,
+    weather_condition: autoWeather,
+    work_code: project?.code || settings.contract_number || '',
+    work_force_count: 0,
+    work_force_sufficient: 1,
+    representative_engineer: settings.contractor_representative || '',
+    representative_present: 1,
+    contractor_notes: '',
+    supervisor_notes: settings.regional_superintendency || 'DER/PR SUPERINTENDÊNCIA REGIONAL NOROESTE',
+    fiscal_notes: '',
+    services_developed: JSON.stringify(autoServices),
+    photos_count: photos.length,
+    available_photos: photos,
+    pluviometry: pluv || null,
+    settings,
+    is_draft: true
+  });
+});
+
+app.post('/api/rdo', authenticate, (req, res) => {
+  const {
+    project_id,
+    folio_number,
+    rdo_date,
+    weather_condition,
+    work_code,
+    work_force_count,
+    work_force_sufficient,
+    representative_engineer,
+    representative_present,
+    contractor_notes,
+    supervisor_notes,
+    fiscal_notes,
+    services_developed,
+    status
+  } = req.body;
+
+  if (!project_id || !rdo_date) {
+    return res.status(400).json({ error: 'Obra e data do RDO são obrigatórias.' });
+  }
+
+  const pid = Number(project_id);
+  if (!canUserAccessProject(req.user, pid)) {
+    return res.status(403).json({ error: 'Sem permissão nesta obra.' });
+  }
+
+  const servicesJson = Array.isArray(services_developed)
+    ? JSON.stringify(services_developed)
+    : typeof services_developed === 'string'
+    ? services_developed
+    : '[]';
+
+  const folio = Number(folio_number) || 1;
+
+  db.prepare(`
+    INSERT INTO rdo_records (
+      project_id, user_id, folio_number, rdo_date, weather_condition, work_code,
+      work_force_count, work_force_sufficient, representative_engineer, representative_present,
+      contractor_notes, supervisor_notes, fiscal_notes, services_developed, status, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(project_id, rdo_date) DO UPDATE SET
+      folio_number = excluded.folio_number,
+      weather_condition = excluded.weather_condition,
+      work_code = excluded.work_code,
+      work_force_count = excluded.work_force_count,
+      work_force_sufficient = excluded.work_force_sufficient,
+      representative_engineer = excluded.representative_engineer,
+      representative_present = excluded.representative_present,
+      contractor_notes = excluded.contractor_notes,
+      supervisor_notes = excluded.supervisor_notes,
+      fiscal_notes = excluded.fiscal_notes,
+      services_developed = excluded.services_developed,
+      status = excluded.status,
+      updated_at = CURRENT_TIMESTAMP
+  `).run(
+    pid,
+    req.user.id,
+    folio,
+    rdo_date,
+    weather_condition || 'BOM',
+    work_code || '',
+    Number(work_force_count) || 0,
+    work_force_sufficient !== undefined ? (work_force_sufficient ? 1 : 0) : 1,
+    representative_engineer || '',
+    representative_present !== undefined ? (representative_present ? 1 : 0) : 1,
+    contractor_notes || '',
+    supervisor_notes || '',
+    fiscal_notes || '',
+    servicesJson,
+    status || 'EM_ANDAMENTO'
+  );
+
+  const saved = db
+    .prepare(`
+      SELECT r.*, p.name as project_name, p.code as project_code
+      FROM rdo_records r
+      JOIN projects p ON p.id = r.project_id
+      WHERE r.project_id = ? AND r.rdo_date = ?
+    `)
+    .get(pid, rdo_date);
+
+  res.status(200).json(saved);
+});
+
+app.post('/api/rdo/sync-services', authenticate, (req, res) => {
+  const { project_id, rdo_date } = req.body;
+  if (!project_id || !rdo_date) {
+    return res.status(400).json({ error: 'Obra e data são obrigatórias.' });
+  }
+
+  const pid = Number(project_id);
+  const photos = db
+    .prepare('SELECT title, description FROM photos WHERE project_id = ? AND taken_at = ? ORDER BY id ASC')
+    .all(pid, rdo_date);
+
+  const services = photos.map((p) => p.title.trim()).filter(Boolean);
+  res.json({ services });
+});
+
+app.delete('/api/rdo/:id', authenticate, (req, res) => {
+  const rdoId = Number(req.params.id);
+  const existing = db.prepare('SELECT * FROM rdo_records WHERE id = ?').get(rdoId);
+  if (!existing) return res.status(404).json({ error: 'RDO não encontrado.' });
+
+  if (!canUserAccessProject(req.user, existing.project_id)) {
+    return res.status(403).json({ error: 'Sem permissão.' });
+  }
+
+  db.prepare('DELETE FROM rdo_records WHERE id = ?').run(rdoId);
   res.json({ success: true });
 });
 
