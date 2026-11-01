@@ -230,43 +230,43 @@ export default function SettingsView({ projects, selectedProjectId, currentUser 
       )}
 
       {/* Main Tabs Navigation */}
-      <div className="flex border-b border-slate-200 bg-white rounded-t-xl px-4 pt-2 shadow-xs">
+      <div className="flex overflow-x-auto no-scrollbar border-b border-slate-200 bg-white rounded-t-xl px-2 sm:px-4 pt-2 shadow-xs">
         <button
           type="button"
           onClick={() => setActiveTab('CONTRACT')}
-          className={`px-5 py-3 text-xs font-bold border-b-2 flex items-center gap-2 transition ${
+          className={`px-3.5 sm:px-5 py-3 text-xs font-bold border-b-2 flex items-center gap-2 whitespace-nowrap shrink-0 transition ${
             activeTab === 'CONTRACT'
               ? 'border-amber-500 text-amber-700 bg-amber-50/40'
               : 'border-transparent text-slate-500 hover:text-slate-800'
           }`}
         >
-          <Building2 className="w-4 h-4" />
+          <Building2 className="w-4 h-4 shrink-0" />
           1. Contrato e Participantes (RDO & Relatórios)
         </button>
 
         <button
           type="button"
           onClick={() => setActiveTab('REPORT_BANNER')}
-          className={`px-5 py-3 text-xs font-bold border-b-2 flex items-center gap-2 transition ${
+          className={`px-3.5 sm:px-5 py-3 text-xs font-bold border-b-2 flex items-center gap-2 whitespace-nowrap shrink-0 transition ${
             activeTab === 'REPORT_BANNER'
               ? 'border-amber-500 text-amber-700 bg-amber-50/40'
               : 'border-transparent text-slate-500 hover:text-slate-800'
           }`}
         >
-          <FileText className="w-4 h-4" />
+          <FileText className="w-4 h-4 shrink-0" />
           2. Banner e Layout de Relatórios
         </button>
 
         <button
           type="button"
           onClick={() => setActiveTab('OCCURRENCE_FIELDS')}
-          className={`px-5 py-3 text-xs font-bold border-b-2 flex items-center gap-2 transition ${
+          className={`px-3.5 sm:px-5 py-3 text-xs font-bold border-b-2 flex items-center gap-2 whitespace-nowrap shrink-0 transition ${
             activeTab === 'OCCURRENCE_FIELDS'
               ? 'border-amber-500 text-amber-700 bg-amber-50/40'
               : 'border-transparent text-slate-500 hover:text-slate-800'
           }`}
         >
-          <Sliders className="w-4 h-4" />
+          <Sliders className="w-4 h-4 shrink-0" />
           3. Campos Personalizáveis de Ocorrências
         </button>
       </div>
@@ -493,7 +493,7 @@ export default function SettingsView({ projects, selectedProjectId, currentUser 
                 <label className="block text-xs font-bold text-slate-700 mb-1">
                   Modo do Banner Superior (Aplicado no RDO e no Relatório Fotográfico)
                 </label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   {[
                     { id: 'TEXT', label: 'Caixa de Texto Formatado' },
                     { id: 'IMAGE', label: 'Imagem / Logo Banner' },

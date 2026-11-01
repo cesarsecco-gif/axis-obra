@@ -1540,15 +1540,15 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
       {/* =========================================================================
           TOP ACTIONS & CONTROLS BAR
          ========================================================================= */}
-      <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+      <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-amber-500/10 text-amber-600">
+          <div className="flex items-start sm:items-center gap-2.5">
+            <div className="p-2 rounded-xl bg-amber-500/10 text-amber-600 shrink-0">
               <FileText className="w-6 h-6" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-xl font-bold text-slate-900">2. RDO — Registro Diário de Obras</h2>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-lg sm:text-xl font-bold text-slate-900">2. RDO — Registro Diário de Obras</h2>
                 <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
                   Padrão DER/PR
                 </span>
@@ -1561,11 +1561,11 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
         </div>
 
         {/* Global Batch & Export buttons */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="grid grid-cols-1 sm:flex sm:flex-wrap items-center gap-2 w-full lg:w-auto">
           <button
             type="button"
             onClick={handleOpenBatchModal}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold shadow-xs transition"
+            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 sm:py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold shadow-xs transition"
           >
             <Sparkles className="w-4 h-4 text-amber-300" />
             Gerar RDOs em Lote
@@ -1574,7 +1574,7 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
           <button
             type="button"
             onClick={() => setExportModalOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-sky-700 hover:bg-sky-800 text-white text-xs font-bold shadow-xs transition"
+            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 sm:py-2 rounded-xl bg-sky-700 hover:bg-sky-800 text-white text-xs font-bold shadow-xs transition"
           >
             <Download className="w-4 h-4 text-sky-200" />
             Exportar PDF / Excel
@@ -1583,7 +1583,7 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
           <button
             type="button"
             onClick={() => handlePrintA4Rdo()}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-400 text-xs font-bold shadow-xs transition"
+            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 sm:py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-400 text-xs font-bold shadow-xs transition"
           >
             <Printer className="w-4 h-4" />
             Visualizar Folha Oficial
@@ -1624,16 +1624,16 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
       {/* =========================================================================
           ITEM 1: FILTER INTERVAL WITH RAPID YEAR & MONTH SELECTORS
          ========================================================================= */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="bg-white p-3.5 sm:p-4 rounded-xl border border-slate-200 shadow-xs space-y-3">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
           {/* Obra selector */}
-          <div className="flex items-center gap-2">
-            <Building2 className="w-4 h-4 text-amber-500" />
-            <span className="text-xs font-bold text-slate-700">Obra:</span>
+          <div className="flex items-center gap-2 min-w-0">
+            <Building2 className="w-4 h-4 text-amber-500 shrink-0" />
+            <span className="text-xs font-bold text-slate-700 shrink-0">Obra:</span>
             <select
               value={targetProjectId}
               onChange={(e) => setTargetProjectId(e.target.value)}
-              className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-semibold bg-white"
+              className="w-full sm:w-auto max-w-full truncate px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-semibold bg-white"
             >
               {projects.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -1644,64 +1644,70 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
           </div>
 
           {/* Quick Year & Month Selectors + Date Range */}
-          <div className="flex flex-wrap items-center gap-2.5">
-            <div className="flex items-center gap-1.5 text-xs text-slate-700 font-bold">
-              <span>Ano:</span>
-              <select
-                value={selectedYear}
-                onChange={(e) => handleYearFilterChange(e.target.value)}
-                className="border border-slate-300 rounded px-2 py-1 text-xs font-semibold bg-white"
-              >
-                <option value="ALL">Todos os Anos</option>
-                <option value="2026">2026</option>
-                <option value="2025">2025</option>
-                <option value="2024">2024</option>
-              </select>
+          <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2.5">
+            <div className="grid grid-cols-2 sm:flex items-center gap-2">
+              <div className="flex items-center gap-1.5 text-xs text-slate-700 font-bold">
+                <span className="shrink-0">Ano:</span>
+                <select
+                  value={selectedYear}
+                  onChange={(e) => handleYearFilterChange(e.target.value)}
+                  className="w-full sm:w-auto border border-slate-300 rounded-lg px-2 py-1.5 sm:py-1 text-xs font-semibold bg-white"
+                >
+                  <option value="ALL">Todos os Anos</option>
+                  <option value="2026">2026</option>
+                  <option value="2025">2025</option>
+                  <option value="2024">2024</option>
+                </select>
+              </div>
+
+              <div className="flex items-center gap-1.5 text-xs text-slate-700 font-bold">
+                <span className="shrink-0">Mês:</span>
+                <select
+                  value={selectedMonth}
+                  onChange={(e) => handleMonthFilterChange(e.target.value)}
+                  className="w-full sm:w-auto border border-slate-300 rounded-lg px-2 py-1.5 sm:py-1 text-xs font-semibold bg-white"
+                >
+                  {MONTHS_LIST.map((m) => (
+                    <option key={m.key} value={m.key}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
 
-            <div className="flex items-center gap-1.5 text-xs text-slate-700 font-bold">
-              <span>Mês:</span>
-              <select
-                value={selectedMonth}
-                onChange={(e) => handleMonthFilterChange(e.target.value)}
-                className="border border-slate-300 rounded px-2 py-1 text-xs font-semibold bg-white"
-              >
-                {MONTHS_LIST.map((m) => (
-                  <option key={m.key} value={m.key}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex items-center gap-1.5 text-xs text-slate-600 border-l border-slate-200 pl-2">
-              <span className="font-bold">De:</span>
-              <input
-                type="date"
-                value={fromDate}
-                onChange={(e) => setFromDate(e.target.value)}
-                className="border border-slate-300 rounded px-2 py-1 text-xs font-semibold"
-              />
-              <span className="font-bold">até:</span>
-              <input
-                type="date"
-                value={toDate}
-                onChange={(e) => setToDate(e.target.value)}
-                className="border border-slate-300 rounded px-2 py-1 text-xs font-semibold"
-              />
+            <div className="grid grid-cols-2 sm:flex items-center gap-2 text-xs text-slate-600 sm:border-l sm:border-slate-200 sm:pl-2">
+              <div className="flex items-center gap-1">
+                <span className="font-bold shrink-0">De:</span>
+                <input
+                  type="date"
+                  value={fromDate}
+                  onChange={(e) => setFromDate(e.target.value)}
+                  className="w-full sm:w-auto border border-slate-300 rounded-lg px-2 py-1.5 sm:py-1 text-xs font-semibold"
+                />
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="font-bold shrink-0">até:</span>
+                <input
+                  type="date"
+                  value={toDate}
+                  onChange={(e) => setToDate(e.target.value)}
+                  className="w-full sm:w-auto border border-slate-300 rounded-lg px-2 py-1.5 sm:py-1 text-xs font-semibold"
+                />
+              </div>
             </div>
           </div>
         </div>
 
         {/* Existing RDO Pills Bar */}
         <div className="pt-2 border-t border-slate-100">
-          <div className="flex items-center justify-between mb-2">
+          <div className="flex flex-wrap items-center justify-between gap-1 mb-2">
             <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
               <CalendarDays className="w-3.5 h-3.5 text-emerald-600" />
               RDOs cadastrados no intervalo ({filteredRdos.length}):
             </span>
             <span className="text-[11px] text-slate-400">
-              Clique em um dia para abrir e editar
+              Toque em um dia para abrir e editar
             </span>
           </div>
 
@@ -1710,7 +1716,7 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
               Nenhum RDO cadastrado neste período. Utilize as opções de criação abaixo.
             </div>
           ) : (
-            <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-1">
+            <div className="flex flex-wrap gap-2 max-h-36 overflow-y-auto p-1">
               {filteredRdos.map((rec) => {
                 const isActive = rec.rdo_date === currentDate;
                 const isFinal = rec.status === 'final';
@@ -1749,203 +1755,205 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
           - Ponto colorido para dias com registro fotográfico (🟠)
           - Destaque em verde para dias em que já foi gerado RDO (🟢)
          ========================================================================= */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3 relative">
-        <div className="flex items-center gap-1.5 bg-slate-50 p-1 rounded-xl border border-slate-200 relative" ref={calendarRef}>
-          <button
-            type="button"
-            onClick={() => handleShiftDate(-1)}
-            className="p-1.5 rounded-lg hover:bg-white text-slate-600 hover:text-slate-900 transition"
-            title="Dia Anterior"
-          >
-            <ChevronLeft className="w-4 h-4" />
-          </button>
-
-          {/* Date button that triggers the custom calendar */}
-          <button
-            type="button"
-            onClick={() => setCalendarOpen((v) => !v)}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg hover:bg-white text-xs font-bold text-slate-800 transition"
-            title="Abrir calendário interativo com marcações de fotos e RDOs"
-          >
-            <CalendarIcon className="w-4 h-4 text-amber-500" />
-            <span>{brDate(currentDate)}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleShiftDate(1)}
-            className="p-1.5 rounded-lg hover:bg-white text-slate-600 hover:text-slate-900 transition"
-            title="Dia Seguinte"
-          >
-            <ChevronRight className="w-4 h-4" />
-          </button>
-
-          <button
-            type="button"
-            onClick={handleSetToday}
-            className="px-2.5 py-1 text-[11px] font-bold rounded-md bg-white text-slate-700 hover:bg-slate-100 border border-slate-200 shadow-2xs ml-1"
-          >
-            Hoje
-          </button>
-
-          {/* =====================================================================
-              CUSTOM CALENDAR POPOVER (POPUP COM MARCAÇÕES)
-             ===================================================================== */}
-          {calendarOpen && (
-            <div className="absolute top-full left-0 mt-2 z-50 w-72 bg-white rounded-2xl shadow-2xl border border-slate-200 p-3 space-y-2 animate-in fade-in zoom-in-95">
-              {/* Calendar Header with Month/Year Navigation */}
-              <div className="flex items-center justify-between pb-1 border-b border-slate-100">
-                <span className="text-xs font-black text-slate-900 capitalize">
-                  {calMonthName} de {calYear}
-                </span>
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={handlePrevCalMonth}
-                    className="p-1 rounded-md hover:bg-slate-100 text-slate-600"
-                    title="Mês Anterior"
-                  >
-                    <ChevronLeft className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleNextCalMonth}
-                    className="p-1 rounded-md hover:bg-slate-100 text-slate-600"
-                    title="Próximo Mês"
-                  >
-                    <ChevronRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Weekday column headers */}
-              <div className="grid grid-cols-7 text-center font-bold text-[10px] text-slate-400">
-                <span>D</span>
-                <span>S</span>
-                <span>T</span>
-                <span>Q</span>
-                <span>Q</span>
-                <span>S</span>
-                <span>S</span>
-              </div>
-
-              {/* Days Grid */}
-              <div className="grid grid-cols-7 gap-1">
-                {calendarDays.map((cell, idx) => {
-                  const hasRdo = rdosMap.has(cell.dateKey);
-                  const photoCount = photoDatesMap.get(cell.dateKey) || 0;
-                  const hasPhotos = photoCount > 0;
-                  const isSelected = cell.dateKey === currentDate;
-
-                  return (
-                    <button
-                      key={idx}
-                      type="button"
-                      onClick={() => {
-                        setCurrentDate(cell.dateKey);
-                        setCalendarOpen(false);
-                      }}
-                      title={`${brDate(cell.dateKey)}${hasRdo ? ' • RDO Gerado' : ''}${hasPhotos ? ` • ${photoCount} foto(s)` : ''}`}
-                      className={`h-8 rounded-lg flex flex-col items-center justify-center relative text-xs font-bold transition ${
-                        !cell.isCurrentMonth
-                          ? 'text-slate-300 hover:text-slate-500'
-                          : isSelected
-                          ? 'ring-2 ring-blue-500 font-black'
-                          : 'text-slate-700 hover:bg-slate-100'
-                      } ${
-                        hasRdo
-                          ? 'bg-emerald-100 text-emerald-900 border border-emerald-400 hover:bg-emerald-200'
-                          : ''
-                      }`}
-                    >
-                      <span className="leading-tight">{cell.dayNumber}</span>
-                      {/* Ponto indicador de Registro Fotográfico */}
-                      {hasPhotos && (
-                        <span
-                          className={`w-1.5 h-1.5 rounded-full absolute bottom-1 ${
-                            hasRdo ? 'bg-amber-600' : 'bg-amber-500'
-                          }`}
-                        />
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Legend Footer */}
-              <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-500">
-                <div className="flex items-center gap-2">
-                  <span className="flex items-center gap-1">
-                    <span className="w-2.5 h-2.5 rounded bg-emerald-100 border border-emerald-400 inline-block" />
-                    <span>RDO gerado</span>
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" />
-                    <span>Com fotos</span>
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    handleSetToday();
-                    setCalendarOpen(false);
-                  }}
-                  className="font-bold text-blue-600 hover:underline"
-                >
-                  Hoje
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* =====================================================================
-            ITEM 3: APROVADO — STATUS BADGE & PHOTO COUNT (EXATAMENTE COMO NA FOTO 3)
-           ===================================================================== */}
-        <div className="flex flex-wrap items-center gap-2">
-          {dayExists ? (
-            isLocked ? (
-              <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1">
-                <Lock className="w-3 h-3 text-emerald-700" />
-                Folha Nº {rdoData.folio_number} — FINALIZADO
-              </span>
-            ) : (
-              <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300 flex items-center gap-1">
-                <Unlock className="w-3 h-3 text-amber-700" />
-                Folha Nº {rdoData.folio_number} — RASCUNHO
-              </span>
-            )
-          ) : (
-            <span className="px-3 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-600 border border-slate-300">
-              Sem RDO criado para esta data
-            </span>
-          )}
-
-          <span className="text-xs text-slate-600">
-            Fotos no dia: <strong className="text-slate-900">{rdoData.photos_count || 0}</strong>
-          </span>
-
-          {dayExists && (
+      <div className="bg-white p-3.5 sm:p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3 relative">
+        <div className="flex flex-wrap items-center justify-between sm:justify-start gap-2 w-full md:w-auto">
+          <div className="flex items-center gap-1 bg-slate-50 p-1 rounded-xl border border-slate-200 relative" ref={calendarRef}>
             <button
               type="button"
-              onClick={handleDeleteRdo}
-              className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 hover:text-rose-700 transition"
-              title="Excluir este RDO"
+              onClick={() => handleShiftDate(-1)}
+              className="p-2 sm:p-1.5 rounded-lg hover:bg-white text-slate-600 hover:text-slate-900 transition"
+              title="Dia Anterior"
             >
-              <Trash2 className="w-4 h-4" />
+              <ChevronLeft className="w-4 h-4" />
             </button>
-          )}
+
+            {/* Date button that triggers the custom calendar */}
+            <button
+              type="button"
+              onClick={() => setCalendarOpen((v) => !v)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 sm:py-1 rounded-lg hover:bg-white text-xs font-bold text-slate-800 transition"
+              title="Abrir calendário interativo com marcações de fotos e RDOs"
+            >
+              <CalendarIcon className="w-4 h-4 text-amber-500" />
+              <span>{brDate(currentDate)}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleShiftDate(1)}
+              className="p-2 sm:p-1.5 rounded-lg hover:bg-white text-slate-600 hover:text-slate-900 transition"
+              title="Dia Seguinte"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+
+            <button
+              type="button"
+              onClick={handleSetToday}
+              className="px-2.5 py-1.5 sm:py-1 text-[11px] font-bold rounded-md bg-white text-slate-700 hover:bg-slate-100 border border-slate-200 shadow-2xs ml-1"
+            >
+              Hoje
+            </button>
+
+            {/* =====================================================================
+                CUSTOM CALENDAR POPOVER (POPUP COM MARCAÇÕES)
+               ===================================================================== */}
+            {calendarOpen && (
+              <div className="absolute top-full left-0 mt-2 z-50 w-72 max-w-[calc(100vw-2rem)] bg-white rounded-2xl shadow-2xl border border-slate-200 p-3 space-y-2 animate-in fade-in zoom-in-95">
+                {/* Calendar Header with Month/Year Navigation */}
+                <div className="flex items-center justify-between pb-1 border-b border-slate-100">
+                  <span className="text-xs font-black text-slate-900 capitalize">
+                    {calMonthName} de {calYear}
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={handlePrevCalMonth}
+                      className="p-1.5 rounded-md hover:bg-slate-100 text-slate-600"
+                      title="Mês Anterior"
+                    >
+                      <ChevronLeft className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleNextCalMonth}
+                      className="p-1.5 rounded-md hover:bg-slate-100 text-slate-600"
+                      title="Próximo Mês"
+                    >
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Weekday column headers */}
+                <div className="grid grid-cols-7 text-center font-bold text-[10px] text-slate-400">
+                  <span>D</span>
+                  <span>S</span>
+                  <span>T</span>
+                  <span>Q</span>
+                  <span>Q</span>
+                  <span>S</span>
+                  <span>S</span>
+                </div>
+
+                {/* Days Grid */}
+                <div className="grid grid-cols-7 gap-1">
+                  {calendarDays.map((cell, idx) => {
+                    const hasRdo = rdosMap.has(cell.dateKey);
+                    const photoCount = photoDatesMap.get(cell.dateKey) || 0;
+                    const hasPhotos = photoCount > 0;
+                    const isSelected = cell.dateKey === currentDate;
+
+                    return (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => {
+                          setCurrentDate(cell.dateKey);
+                          setCalendarOpen(false);
+                        }}
+                        title={`${brDate(cell.dateKey)}${hasRdo ? ' • RDO Gerado' : ''}${hasPhotos ? ` • ${photoCount} foto(s)` : ''}`}
+                        className={`h-8 rounded-lg flex flex-col items-center justify-center relative text-xs font-bold transition ${
+                          !cell.isCurrentMonth
+                            ? 'text-slate-300 hover:text-slate-500'
+                            : isSelected
+                            ? 'ring-2 ring-blue-500 font-black'
+                            : 'text-slate-700 hover:bg-slate-100'
+                        } ${
+                          hasRdo
+                            ? 'bg-emerald-100 text-emerald-900 border border-emerald-400 hover:bg-emerald-200'
+                            : ''
+                        }`}
+                      >
+                        <span className="leading-tight">{cell.dayNumber}</span>
+                        {/* Ponto indicador de Registro Fotográfico */}
+                        {hasPhotos && (
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full absolute bottom-1 ${
+                              hasRdo ? 'bg-amber-600' : 'bg-amber-500'
+                            }`}
+                          />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Legend Footer */}
+                <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-500">
+                  <div className="flex items-center gap-2">
+                    <span className="flex items-center gap-1">
+                      <span className="w-2.5 h-2.5 rounded bg-emerald-100 border border-emerald-400 inline-block" />
+                      <span>RDO gerado</span>
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" />
+                      <span>Com fotos</span>
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleSetToday();
+                      setCalendarOpen(false);
+                    }}
+                    className="font-bold text-blue-600 hover:underline"
+                  >
+                    Hoje
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* =====================================================================
+              ITEM 3: APROVADO — STATUS BADGE & PHOTO COUNT (EXATAMENTE COMO NA FOTO 3)
+             ===================================================================== */}
+          <div className="flex flex-wrap items-center gap-2">
+            {dayExists ? (
+              isLocked ? (
+                <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1">
+                  <Lock className="w-3 h-3 text-emerald-700" />
+                  Folha Nº {rdoData.folio_number} — FINALIZADO
+                </span>
+              ) : (
+                <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300 flex items-center gap-1">
+                  <Unlock className="w-3 h-3 text-amber-700" />
+                  Folha Nº {rdoData.folio_number} — RASCUNHO
+                </span>
+              )
+            ) : (
+              <span className="px-3 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-600 border border-slate-300">
+                Sem RDO criado para esta data
+              </span>
+            )}
+
+            <span className="text-xs text-slate-600">
+              Fotos no dia: <strong className="text-slate-900">{rdoData.photos_count || 0}</strong>
+            </span>
+
+            {dayExists && (
+              <button
+                type="button"
+                onClick={handleDeleteRdo}
+                className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 hover:text-rose-700 transition"
+                title="Excluir este RDO"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Action Buttons for current day */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="grid grid-cols-1 sm:flex sm:flex-wrap items-center gap-2 w-full md:w-auto">
           {dayExists && !isLocked && (
             <>
               <button
                 type="button"
                 onClick={handleSyncWithPhotos}
                 disabled={syncing}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-sky-300 bg-sky-50 hover:bg-sky-100 text-sky-800 text-xs font-bold shadow-xs transition"
+                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-sky-300 bg-sky-50 hover:bg-sky-100 text-sky-800 text-xs font-bold shadow-xs transition"
                 title="Sincroniza os serviços a partir das fotos deste dia"
               >
                 <RefreshCw className={`w-3.5 h-3.5 text-sky-600 ${syncing ? 'animate-spin' : ''}`} />
@@ -1956,7 +1964,7 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
                 type="button"
                 onClick={() => handleSaveRdo('draft')}
                 disabled={saving}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-bold shadow-xs transition"
+                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-bold shadow-xs transition"
               >
                 <Save className="w-3.5 h-3.5 text-slate-600" />
                 Salvar Rascunho
@@ -1966,7 +1974,7 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
                 type="button"
                 onClick={handleFinalizeRdo}
                 disabled={saving}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold shadow-xs transition"
+                className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold shadow-xs transition"
               >
                 <Check className="w-4 h-4 text-emerald-200" />
                 Finalizar RDO
@@ -1979,7 +1987,7 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
               type="button"
               onClick={handleReopenRdo}
               disabled={saving}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-bold shadow-xs transition"
+              className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-bold shadow-xs transition"
             >
               <Unlock className="w-3.5 h-3.5 text-amber-700" />
               Reabrir para Correções
@@ -2093,12 +2101,12 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
           OFFICIAL DER/PR TEMPLATE VIEW (APPROVED LAYOUT)
          ========================================================================= */}
       {dayExists && (
-        <div className="bg-slate-100 p-4 sm:p-6 rounded-2xl border border-slate-300 flex justify-center">
-          <div className="bg-white w-full max-w-[850px] p-6 sm:p-8 rounded-xl shadow-md border border-slate-300 space-y-3 font-sans text-xs">
+        <div className="bg-slate-100 p-2 sm:p-6 rounded-2xl border border-slate-300 flex justify-center">
+          <div className="bg-white w-full max-w-[850px] p-3 sm:p-8 rounded-xl shadow-md border border-slate-300 space-y-3 font-sans text-xs">
             
             {/* Header: Banner Customizável (Configurado no Módulo 8 - mesmo critério do Relatório Fotográfico) */}
             <div
-              className="border border-slate-900 p-3 flex flex-col justify-center gap-1.5 min-h-[56px]"
+              className="border border-slate-900 p-2.5 sm:p-3 flex flex-col justify-center gap-1.5 min-h-[56px]"
               style={{ textAlign: bannerAlignCss }}
             >
               {showBannerImg && (
@@ -2136,11 +2144,11 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
               <div className="divide-y divide-slate-900">
                 <div className="p-2">
                   <span className="block text-[10px] font-bold text-slate-500 uppercase">EMPRESA</span>
-                  <div className="font-bold text-xs text-slate-900">{contractorCompany}</div>
+                  <div className="font-bold text-xs text-slate-900 break-words">{contractorCompany}</div>
                 </div>
 
                 <div className="p-2">
-                  <div className="flex items-center justify-between mb-1">
+                  <div className="flex flex-wrap items-center justify-between gap-1 mb-1.5">
                     <span className="text-[10px] font-bold text-slate-500 uppercase">TEMPO (CLIMA)</span>
                     {rdoData.pluviometry && (
                       <span className="text-[10px] font-medium text-sky-700 bg-sky-50 px-1.5 rounded">
@@ -2148,7 +2156,7 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
                       </span>
                     )}
                   </div>
-                  <div className="grid grid-cols-4 gap-1">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                     {WEATHER_CHOICES.map((w) => {
                       const isActive = rdoData.weather_condition === w.key;
                       return (
@@ -2157,7 +2165,7 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
                           type="button"
                           disabled={isLocked}
                           onClick={() => setRdoData({ ...rdoData, weather_condition: w.key })}
-                          className={`py-1 text-center font-bold text-[10px] rounded border transition ${
+                          className={`py-1.5 sm:py-1 text-center font-bold text-[10px] rounded border transition ${
                             isActive
                               ? 'bg-emerald-700 text-white border-emerald-700 shadow-2xs'
                               : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
@@ -2198,7 +2206,7 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
                   </div>
                   <div className="p-2 text-center">
                     <span className="block text-[10px] font-bold text-slate-500 uppercase">DATA (dd/mm/aaaa)</span>
-                    <div className="flex items-center justify-center gap-2 mt-0.5 font-bold text-xs">
+                    <div className="flex items-center justify-center gap-1 sm:gap-2 mt-0.5 font-bold text-xs">
                       <span className="border border-slate-300 px-1.5 py-0.5 rounded bg-slate-50">{dateParts.day}</span>
                       <span>/</span>
                       <span className="border border-slate-300 px-1.5 py-0.5 rounded bg-slate-50">{dateParts.month}</span>
@@ -2210,12 +2218,12 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
 
                 <div className="p-2">
                   <span className="block text-[10px] font-bold text-slate-500 uppercase">CONTRATO Nº</span>
-                  <div className="font-bold text-xs text-slate-900">{contractNumber}</div>
+                  <div className="font-bold text-xs text-slate-900 break-words">{contractNumber}</div>
                 </div>
 
                 <div className="p-2">
                   <span className="block text-[10px] font-bold text-slate-500 uppercase">SUPERVISORA</span>
-                  <div className="font-bold text-xs text-slate-900">{supervisorCompany}</div>
+                  <div className="font-bold text-xs text-slate-900 break-words">{supervisorCompany}</div>
                 </div>
 
                 <div className="p-2">
@@ -2226,7 +2234,7 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
                       return (
                         <div
                           key={wd.key}
-                          className={`py-0.5 text-center font-bold text-[10px] rounded border ${
+                          className={`py-1 sm:py-0.5 text-center font-bold text-[9px] sm:text-[10px] rounded border ${
                             isActive
                               ? 'bg-emerald-700 text-white border-emerald-700'
                               : 'bg-white text-slate-600 border-slate-300'
@@ -2242,27 +2250,27 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
             </div>
 
             {/* Section Header: SERVIÇOS DESENVOLVIDOS NO DIA */}
-            <div className="border border-slate-900 bg-slate-50 p-2 flex items-center justify-between">
+            <div className="border border-slate-900 bg-slate-50 p-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <span className="font-extrabold text-xs text-slate-900 tracking-wide uppercase">
                 SERVIÇOS DESENVOLVIDOS NO DIA:
               </span>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                 <span className="text-[11px] text-slate-500 font-semibold">
-                  Exibindo {servicesLines.length} linhas ({totalPages} folha/página{totalPages > 1 ? 's' : ''})
+                  {servicesLines.length} linhas ({totalPages} pág.)
                 </span>
                 {!isLocked && (
                   <>
                     <button
                       type="button"
                       onClick={handleAddLine}
-                      className="px-2 py-0.5 rounded bg-white hover:bg-slate-100 border border-slate-300 text-[11px] font-bold text-slate-700"
+                      className="px-2.5 py-1 sm:py-0.5 rounded bg-white hover:bg-slate-100 border border-slate-300 text-[11px] font-bold text-slate-700"
                     >
                       + 1 Linha
                     </button>
                     <button
                       type="button"
                       onClick={handleAddNextPage}
-                      className="px-2 py-0.5 rounded bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-[11px] font-bold text-emerald-800"
+                      className="px-2.5 py-1 sm:py-0.5 rounded bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-[11px] font-bold text-emerald-800"
                     >
                       + Abrir Nova Folha (12 linhas)
                     </button>
@@ -2283,7 +2291,7 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
                       </div>
                     )}
                     <div className="flex items-center hover:bg-slate-50 transition">
-                      <span className="w-8 text-center font-bold text-[11px] text-slate-500 border-r border-slate-200 py-1.5 select-none">
+                      <span className="w-8 text-center font-bold text-[11px] text-slate-500 border-r border-slate-200 py-2 sm:py-1.5 select-none">
                         {idx + 1}
                       </span>
                       <input
@@ -2292,7 +2300,7 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
                         value={lineText}
                         onChange={(e) => handleLineTextChange(idx, e.target.value)}
                         placeholder={idx === 0 && !isLocked ? 'Ex: EXECUÇÃO DE BSTC Ø0,60' : ''}
-                        className="flex-1 px-3 py-1.5 text-[11px] font-semibold text-slate-900 bg-transparent outline-none focus:bg-amber-50/40 uppercase disabled:text-slate-900"
+                        className="flex-1 min-w-0 px-2.5 sm:px-3 py-2 sm:py-1.5 text-[11px] font-semibold text-slate-900 bg-transparent outline-none focus:bg-amber-50/40 uppercase disabled:text-slate-900"
                       />
                     </div>
                   </React.Fragment>
@@ -2301,7 +2309,7 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
             </div>
 
             {/* Workforce & Representative */}
-            <div className="grid grid-cols-1 md:grid-cols-2 border border-slate-900 divide-y md:divide-y-0 md:divide-x divide-slate-900 p-2 gap-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 border border-slate-900 divide-y md:divide-y-0 md:divide-x divide-slate-900 p-2.5 sm:p-2 gap-2.5 sm:gap-2">
               <div className="space-y-2">
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-bold text-[11px] text-slate-700">PROFISSIONAIS EM ATIVIDADE:</span>
@@ -2311,11 +2319,11 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
                     value={rdoData.work_force_count ?? ''}
                     onChange={(e) => setRdoData({ ...rdoData, work_force_count: e.target.value === '' ? null : Number(e.target.value) })}
                     placeholder="Ex: 320"
-                    className="w-24 px-2 py-0.5 border border-slate-900 font-bold text-center text-xs disabled:text-slate-900"
+                    className="w-24 px-2 py-1 sm:py-0.5 border border-slate-900 font-bold text-center text-xs disabled:text-slate-900"
                   />
                 </div>
 
-                <div className="flex items-center justify-between gap-2">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 sm:gap-2">
                   <span className="font-bold text-[11px] text-slate-700">ENGENHEIRO PREPOSTO:</span>
                   <input
                     type="text"
@@ -2323,20 +2331,20 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
                     value={rdoData.representative_engineer || ''}
                     onChange={(e) => setRdoData({ ...rdoData, representative_engineer: e.target.value })}
                     placeholder="Nome do preposto"
-                    className="flex-1 px-2 py-0.5 border border-slate-900 font-bold text-xs disabled:text-slate-900"
+                    className="flex-1 px-2 py-1 sm:py-0.5 border border-slate-900 font-bold text-xs disabled:text-slate-900"
                   />
                 </div>
               </div>
 
-              <div className="space-y-2 pl-0 md:pl-2 pt-2 md:pt-0">
-                <div className="flex items-center justify-end gap-3">
+              <div className="space-y-2 pl-0 md:pl-2 pt-2.5 md:pt-0">
+                <div className="flex items-center justify-between sm:justify-end gap-3">
                   <span className="font-bold text-[11px] text-slate-700">SUFICIENTE?</span>
                   <div className="inline-flex gap-1">
                     <button
                       type="button"
                       disabled={isLocked}
                       onClick={() => setRdoData({ ...rdoData, work_force_sufficient: 1 })}
-                      className={`px-3 py-0.5 text-[10px] font-bold border rounded ${
+                      className={`px-3 py-1 sm:py-0.5 text-[10px] font-bold border rounded ${
                         rdoData.work_force_sufficient
                           ? 'bg-emerald-700 text-white border-emerald-700'
                           : 'bg-white text-slate-700 border-slate-300'
@@ -2348,7 +2356,7 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
                       type="button"
                       disabled={isLocked}
                       onClick={() => setRdoData({ ...rdoData, work_force_sufficient: 0 })}
-                      className={`px-3 py-0.5 text-[10px] font-bold border rounded ${
+                      className={`px-3 py-1 sm:py-0.5 text-[10px] font-bold border rounded ${
                         !rdoData.work_force_sufficient
                           ? 'bg-emerald-700 text-white border-emerald-700'
                           : 'bg-white text-slate-700 border-slate-300'
@@ -2359,14 +2367,14 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
                   </div>
                 </div>
 
-                <div className="flex items-center justify-end gap-3">
+                <div className="flex items-center justify-between sm:justify-end gap-3">
                   <span className="font-bold text-[11px] text-slate-700">PRESENTE?</span>
                   <div className="inline-flex gap-1">
                     <button
                       type="button"
                       disabled={isLocked}
                       onClick={() => setRdoData({ ...rdoData, representative_present: 1 })}
-                      className={`px-3 py-0.5 text-[10px] font-bold border rounded ${
+                      className={`px-3 py-1 sm:py-0.5 text-[10px] font-bold border rounded ${
                         rdoData.representative_present
                           ? 'bg-emerald-700 text-white border-emerald-700'
                           : 'bg-white text-slate-700 border-slate-300'
@@ -2378,7 +2386,7 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
                       type="button"
                       disabled={isLocked}
                       onClick={() => setRdoData({ ...rdoData, representative_present: 0 })}
-                      className={`px-3 py-0.5 text-[10px] font-bold border rounded ${
+                      className={`px-3 py-1 sm:py-0.5 text-[10px] font-bold border rounded ${
                         !rdoData.representative_present
                           ? 'bg-emerald-700 text-white border-emerald-700'
                           : 'bg-white text-slate-700 border-slate-300'
@@ -2437,8 +2445,8 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
             </div>
 
             {/* Signatures Footer */}
-            <div className="border border-slate-900 grid grid-cols-3 divide-x divide-slate-900 text-center p-3">
-              <div className="space-y-3">
+            <div className="border border-slate-900 grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-slate-900 text-center p-3 gap-3 sm:gap-0">
+              <div className="space-y-3 py-1 sm:py-0">
                 <span className="block text-[9px] font-bold text-slate-600 uppercase">
                   GERENTE DE CONTRATO DA EXECUTORA
                 </span>
@@ -2447,7 +2455,7 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
                 </span>
               </div>
 
-              <div className="space-y-3">
+              <div className="space-y-3 py-1 sm:py-0">
                 <span className="block text-[9px] font-bold text-slate-600 uppercase">
                   ENGENHEIRO DA SUPERVISORA
                 </span>
@@ -2456,7 +2464,7 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
                 </span>
               </div>
 
-              <div className="space-y-3">
+              <div className="space-y-3 py-1 sm:py-0">
                 <span className="block text-[9px] font-bold text-slate-600 uppercase">
                   ENGENHEIRO FISCAL DO DER
                 </span>
