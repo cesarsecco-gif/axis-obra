@@ -1029,7 +1029,7 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
           <style>
             @page {
               size: A4 portrait;
-              margin: 7mm;
+              margin: 6mm 8mm;
             }
             * {
               box-sizing: border-box;
@@ -1041,7 +1041,32 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
               color: #000;
               margin: 0;
               padding: 0;
-              font-size: 10px;
+              font-size: 9px;
+              background: #f8fafc;
+            }
+            @media print {
+              .no-print {
+                display: none !important;
+              }
+              body {
+                margin: 0 !important;
+                padding: 0 !important;
+                background: #fff !important;
+              }
+              .sheet {
+                page-break-after: always !important;
+                break-after: page !important;
+                page-break-inside: avoid !important;
+                break-inside: avoid !important;
+                margin: 0 auto !important;
+                height: 282mm !important;
+                max-height: 282mm !important;
+                box-shadow: none !important;
+              }
+              .sheet:last-child {
+                page-break-after: auto !important;
+                break-after: auto !important;
+              }
             }
             .toolbar {
               background: #0f172a;
@@ -1062,17 +1087,25 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
               cursor: pointer;
             }
             .sheet {
-              max-width: 195mm;
-              height: 278mm;
-              margin: 0 auto;
-              padding: 2mm 0;
+              width: 194mm;
+              max-width: 194mm;
+              height: 282mm;
+              max-height: 282mm;
+              margin: 10px auto;
+              background: #fff;
+              padding: 0;
               page-break-after: always;
+              page-break-inside: avoid;
+              break-after: page;
+              break-inside: avoid;
               display: flex;
               flex-direction: column;
               justify-content: space-between;
+              overflow: hidden;
             }
             .sheet:last-child {
               page-break-after: auto;
+              break-after: auto;
             }
 
             .rdo-top-bar {
@@ -1080,50 +1113,50 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
               align-items: center;
               justify-content: space-between;
               border: 1px solid #000;
-              padding: 4px 8px;
+              padding: 3px 6px;
               margin-bottom: 2px;
             }
             .top-logo-left {
               display: flex;
               align-items: center;
-              gap: 8px;
+              gap: 6px;
             }
             .logo-badge-der {
               border: 1.5px solid #064e3b;
               color: #064e3b;
               font-weight: 900;
-              font-size: 13px;
+              font-size: 12px;
               line-height: 1;
               padding: 2px 4px;
               text-align: center;
             }
             .logo-badge-der span {
-              font-size: 7px;
+              font-size: 6.5px;
               letter-spacing: 1px;
             }
             .state-gov strong {
               display: block;
-              font-size: 11px;
+              font-size: 10px;
               line-height: 1.1;
             }
             .state-gov span {
-              font-size: 7px;
+              font-size: 6.5px;
               color: #444;
             }
             .top-title h1 {
               margin: 0;
-              font-size: 15px;
+              font-size: 14px;
               letter-spacing: 1px;
               font-weight: 900;
             }
             .top-logo-right .c-bold {
               display: block;
               font-weight: 900;
-              font-size: 11px;
+              font-size: 10px;
               color: #1e3a8a;
             }
             .top-logo-right .c-sub {
-              font-size: 7.5px;
+              font-size: 7px;
               color: #444;
             }
 
@@ -1142,25 +1175,27 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
             }
             .sub-cell {
               border-bottom: 1px solid #000;
-              padding: 2px 6px;
-              min-height: 25px;
+              padding: 1.5px 5px;
+              min-height: 22px;
             }
             .sub-cell:last-child {
               border-bottom: none;
             }
             .label {
               display: block;
-              font-size: 7.5px;
+              font-size: 7px;
               color: #444;
               font-weight: bold;
               text-transform: uppercase;
+              line-height: 1;
             }
             .val-text {
-              font-size: 9px;
+              font-size: 8.5px;
               font-weight: bold;
               white-space: nowrap;
               overflow: hidden;
               text-overflow: ellipsis;
+              line-height: 1.2;
             }
 
             .weather-row {
@@ -1172,8 +1207,8 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
               flex: 1;
               border: 1px solid #000;
               text-align: center;
-              font-size: 7px;
-              padding: 2px 0;
+              font-size: 6.5px;
+              padding: 1.5px 0;
               font-weight: bold;
             }
 
@@ -1184,29 +1219,30 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
             .box-folio {
               flex: 1;
               border-right: 1px solid #000;
-              padding: 2px 6px;
+              padding: 1.5px 5px;
               text-align: center;
             }
             .box-folio .box-num {
-              font-size: 12px;
+              font-size: 11px;
               font-weight: 900;
+              line-height: 1.1;
             }
             .box-date {
               flex: 1.2;
-              padding: 2px 6px;
+              padding: 1.5px 5px;
               text-align: center;
             }
             .date-digits {
               display: flex;
               justify-content: center;
-              gap: 4px;
+              gap: 3px;
               font-weight: bold;
-              font-size: 9px;
-              margin-top: 2px;
+              font-size: 8.5px;
+              margin-top: 1px;
             }
             .date-digits span {
               border: 1px solid #666;
-              padding: 1px 4px;
+              padding: 0.5px 3px;
             }
 
             .week-days-row {
@@ -1218,8 +1254,8 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
               flex: 1;
               border: 1px solid #000;
               text-align: center;
-              font-size: 7px;
-              padding: 2px 0;
+              font-size: 6.5px;
+              padding: 1.5px 0;
               font-weight: bold;
             }
 
@@ -1233,8 +1269,8 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
               border-top: none;
               background: #f1f5f9;
               font-weight: 900;
-              font-size: 8.5px;
-              padding: 3px 6px;
+              font-size: 8px;
+              padding: 2.5px 5px;
               letter-spacing: 0.5px;
             }
 
@@ -1247,24 +1283,27 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
             .service-row {
               display: flex;
               border-bottom: 1px solid #ccc;
-              min-height: 12.8px;
-              line-height: 12.8px;
+              height: 5.1mm;
+              max-height: 5.1mm;
+              line-height: 5.1mm;
+              overflow: hidden;
             }
             .service-row:last-child {
               border-bottom: none;
             }
             .service-num {
-              width: 24px;
+              width: 22px;
               text-align: center;
-              font-size: 7.5px;
+              font-size: 7px;
               font-weight: bold;
               border-right: 1px solid #ccc;
               color: #444;
+              flex-shrink: 0;
             }
             .service-text {
               flex: 1;
-              padding-left: 6px;
-              font-size: 8px;
+              padding-left: 5px;
+              font-size: 7.5px;
               font-weight: bold;
               text-transform: uppercase;
               overflow: hidden;
@@ -1276,16 +1315,16 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
               display: flex;
               border: 1px solid #000;
               border-top: none;
-              padding: 3px 6px;
+              padding: 2.5px 5px;
             }
             .wf-left {
               flex: 1.2;
               border-right: 1px solid #000;
-              padding-right: 6px;
+              padding-right: 5px;
             }
             .wf-right {
               flex: 0.8;
-              padding-left: 6px;
+              padding-left: 5px;
               display: flex;
               flex-direction: column;
               justify-content: center;
@@ -1297,44 +1336,46 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
             }
             .val-box {
               border: 1px solid #000;
-              padding: 1px 6px;
+              padding: 1px 4px;
               font-weight: bold;
-              font-size: 8.5px;
-              min-width: 70px;
+              font-size: 8px;
+              min-width: 60px;
               text-align: center;
             }
             .check-group {
               display: flex;
               align-items: center;
               justify-content: flex-end;
-              gap: 4px;
+              gap: 3px;
             }
             .check-label {
-              font-size: 7.5px;
+              font-size: 7px;
               font-weight: bold;
             }
             .check-box {
               border: 1px solid #000;
-              padding: 1px 6px;
-              font-size: 7px;
+              padding: 1px 5px;
+              font-size: 6.5px;
               font-weight: bold;
             }
 
             .notes-block {
               border: 1px solid #000;
               border-top: none;
-              padding: 3px 6px;
-              min-height: 38px;
+              padding: 2px 5px;
+              min-height: 28px;
             }
             .notes-header {
-              font-size: 7.5px;
+              font-size: 7px;
               font-weight: 900;
-              margin-bottom: 2px;
+              margin-bottom: 1px;
             }
             .notes-content {
-              font-size: 8px;
-              line-height: 1.2;
+              font-size: 7.5px;
+              line-height: 1.15;
               white-space: pre-wrap;
+              max-height: 23px;
+              overflow: hidden;
             }
 
             .signatures-grid {
@@ -1345,7 +1386,7 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
             }
             .sig-col {
               flex: 1;
-              padding: 8px 4px 4px 4px;
+              padding: 4px 3px 2px 3px;
               border-right: 1px solid #000;
               display: flex;
               flex-direction: column;
@@ -1356,24 +1397,24 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
             }
             .sig-title {
               display: block;
-              font-size: 7px;
+              font-size: 6.5px;
               font-weight: bold;
-              margin-bottom: 12px;
+              margin-bottom: 8px;
               text-transform: uppercase;
             }
             .sig-name {
               display: block;
-              font-size: 8px;
+              font-size: 7.5px;
               font-weight: bold;
               border-top: 1px solid #000;
-              padding-top: 2px;
+              padding-top: 1.5px;
             }
 
             .page-footer-note {
               text-align: right;
-              font-size: 7.5px;
+              font-size: 7px;
               color: #444;
-              margin-top: 2px;
+              margin-top: 1px;
               font-style: italic;
             }
           </style>

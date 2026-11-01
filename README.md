@@ -85,3 +85,4 @@ O repositório já possui o workflow `.github/workflows/deploy.yml`. Para que a 
 - `VPS_SSH_KEY`: Chave privada SSH para conexão na VPS
 - `VPS_PORT`: Porta SSH (padrão `22`)
 - `VPS_APP_DIR`: Caminho da pasta na VPS (ex: `/var/www/axis-obra`)
+

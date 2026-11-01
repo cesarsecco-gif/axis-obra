@@ -750,3 +750,4 @@ export default function SettingsView({ projects, selectedProjectId, currentUser 
     </div>
   );
 }
+
