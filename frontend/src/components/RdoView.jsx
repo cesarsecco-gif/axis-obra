@@ -143,8 +143,8 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
     settings: {}
   });
 
-  // 20 lines slots per page
-  const [servicesLines, setServicesLines] = useState(Array(20).fill(''));
+  // 12 lines slots per page (reduzido de 20 para 12 conforme solicitado)
+  const [servicesLines, setServicesLines] = useState(Array(12).fill(''));
 
   // Batch Generation Modal State
   const [batchModalOpen, setBatchModalOpen] = useState(false);
@@ -236,8 +236,8 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
 
       const parsedServices = parseServices(data.services_developed);
 
-      // Ensure at least 20 slots
-      const initialSlots = Array(Math.max(20, Math.ceil(parsedServices.length / 20) * 20)).fill('');
+      // Ensure at least 12 slots (multiple of 12 for pages)
+      const initialSlots = Array(Math.max(12, Math.ceil(parsedServices.length / 12) * 12)).fill('');
       parsedServices.forEach((s, idx) => {
         initialSlots[idx] = s;
       });
@@ -406,7 +406,7 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
         status: 'draft'
       }));
 
-      const newSlots = Array(Math.max(20, Math.ceil(cleanServices.length / 20) * 20)).fill('');
+      const newSlots = Array(Math.max(12, Math.ceil(cleanServices.length / 12) * 12)).fill('');
       cleanServices.forEach((s, idx) => {
         newSlots[idx] = s;
       });
@@ -596,7 +596,7 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
       if (incoming.length === 0) {
         alert('Nenhuma fotografia registrada nesta data para esta obra.');
       } else {
-        const newSlots = Array(Math.max(20, Math.ceil(incoming.length / 20) * 20)).fill('');
+        const newSlots = Array(Math.max(12, Math.ceil(incoming.length / 12) * 12)).fill('');
         incoming.forEach((s, idx) => {
           newSlots[idx] = s;
         });
@@ -685,7 +685,7 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
 
   const handleAddNextPage = () => {
     if (rdoData.status === 'final') return;
-    setServicesLines((prev) => [...prev, ...Array(20).fill('')]);
+    setServicesLines((prev) => [...prev, ...Array(12).fill('')]);
   };
 
   // Project metadata
@@ -713,7 +713,7 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
     };
   }, [currentDate]);
 
-  const totalPages = Math.max(1, Math.ceil(servicesLines.length / 20));
+  const totalPages = Math.max(1, Math.ceil(servicesLines.length / 12));
   const isLocked = rdoData.status === 'final';
 
   // ============================================================================
@@ -821,18 +821,18 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
       const yearStr = String(y);
       const weekdayIdx = dt.getUTCDay();
 
-      const activeLines = lines.length > 0 ? lines : Array(20).fill('');
-      const pCount = Math.max(1, Math.ceil(activeLines.length / 20));
+      const activeLines = lines.length > 0 ? lines : Array(12).fill('');
+      const pCount = Math.max(1, Math.ceil(activeLines.length / 12));
 
       for (let pIdx = 0; pIdx < pCount; pIdx++) {
-        const pageLines = activeLines.slice(pIdx * 20, (pIdx + 1) * 20);
-        while (pageLines.length < 20) {
+        const pageLines = activeLines.slice(pIdx * 12, (pIdx + 1) * 12);
+        while (pageLines.length < 12) {
           pageLines.push('');
         }
 
         const linesRowsHtml = pageLines
           .map((text, idx) => {
-            const num = pIdx * 20 + idx + 1;
+            const num = pIdx * 12 + idx + 1;
             return `
               <div class="service-row">
                 <span class="service-num">${num}</span>
@@ -946,7 +946,7 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
               ${pageTitle}
             </div>
 
-            <!-- 20 Service Lines -->
+            <!-- 12 Service Lines -->
             <div class="services-block">
               ${linesRowsHtml}
             </div>
@@ -1283,18 +1283,18 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
             .service-row {
               display: flex;
               border-bottom: 1px solid #ccc;
-              height: 5.1mm;
-              max-height: 5.1mm;
-              line-height: 5.1mm;
+              height: 7.0mm;
+              max-height: 7.0mm;
+              line-height: 7.0mm;
               overflow: hidden;
             }
             .service-row:last-child {
               border-bottom: none;
             }
             .service-num {
-              width: 22px;
+              width: 24px;
               text-align: center;
-              font-size: 7px;
+              font-size: 9px;
               font-weight: bold;
               border-right: 1px solid #ccc;
               color: #444;
@@ -1302,8 +1302,8 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
             }
             .service-text {
               flex: 1;
-              padding-left: 5px;
-              font-size: 7.5px;
+              padding-left: 6px;
+              font-size: 11px;
               font-weight: bold;
               text-transform: uppercase;
               overflow: hidden;
@@ -1315,16 +1315,16 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
               display: flex;
               border: 1px solid #000;
               border-top: none;
-              padding: 2.5px 5px;
+              padding: 4px 6px;
             }
             .wf-left {
               flex: 1.2;
               border-right: 1px solid #000;
-              padding-right: 5px;
+              padding-right: 6px;
             }
             .wf-right {
               flex: 0.8;
-              padding-left: 5px;
+              padding-left: 6px;
               display: flex;
               flex-direction: column;
               justify-content: center;
@@ -1336,45 +1336,45 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
             }
             .val-box {
               border: 1px solid #000;
-              padding: 1px 4px;
+              padding: 2px 6px;
               font-weight: bold;
-              font-size: 8px;
-              min-width: 60px;
+              font-size: 9px;
+              min-width: 65px;
               text-align: center;
             }
             .check-group {
               display: flex;
               align-items: center;
               justify-content: flex-end;
-              gap: 3px;
+              gap: 4px;
             }
             .check-label {
-              font-size: 7px;
+              font-size: 7.5px;
               font-weight: bold;
             }
             .check-box {
               border: 1px solid #000;
-              padding: 1px 5px;
-              font-size: 6.5px;
+              padding: 2px 7px;
+              font-size: 7px;
               font-weight: bold;
             }
 
             .notes-block {
               border: 1px solid #000;
               border-top: none;
-              padding: 2px 5px;
-              min-height: 28px;
+              padding: 4px 6px;
+              min-height: 38px;
             }
             .notes-header {
-              font-size: 7px;
+              font-size: 7.5px;
               font-weight: 900;
-              margin-bottom: 1px;
+              margin-bottom: 2px;
             }
             .notes-content {
-              font-size: 7.5px;
-              line-height: 1.15;
+              font-size: 8.5px;
+              line-height: 1.25;
               white-space: pre-wrap;
-              max-height: 23px;
+              max-height: 32px;
               overflow: hidden;
             }
 
@@ -1386,7 +1386,7 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
             }
             .sig-col {
               flex: 1;
-              padding: 4px 3px 2px 3px;
+              padding: 6px 4px 3px 4px;
               border-right: 1px solid #000;
               display: flex;
               flex-direction: column;
@@ -1397,17 +1397,17 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
             }
             .sig-title {
               display: block;
-              font-size: 6.5px;
+              font-size: 7px;
               font-weight: bold;
-              margin-bottom: 8px;
+              margin-bottom: 14px;
               text-transform: uppercase;
             }
             .sig-name {
               display: block;
-              font-size: 7.5px;
+              font-size: 8px;
               font-weight: bold;
               border-top: 1px solid #000;
-              padding-top: 1.5px;
+              padding-top: 2px;
             }
 
             .page-footer-note {
@@ -2244,26 +2244,26 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
                       onClick={handleAddNextPage}
                       className="px-2 py-0.5 rounded bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-[11px] font-bold text-emerald-800"
                     >
-                      + Abrir Nova Folha (20 linhas)
+                      + Abrir Nova Folha (12 linhas)
                     </button>
                   </>
                 )}
               </div>
             </div>
 
-            {/* The 20 Lines Table */}
+            {/* The 12 Lines Table */}
             <div className="border border-slate-900 divide-y divide-slate-200">
               {servicesLines.map((lineText, idx) => {
-                const isNewPageBoundary = idx > 0 && idx % 20 === 0;
+                const isNewPageBoundary = idx > 0 && idx % 12 === 0;
                 return (
                   <React.Fragment key={idx}>
                     {isNewPageBoundary && (
                       <div className="bg-amber-100/70 p-1.5 text-center font-bold text-[10px] text-amber-900 border-y border-amber-300">
-                        --- Quebra de Página: Folha {rdoData.folio_number} • Página {Math.floor(idx / 20) + 1} de {totalPages} ---
+                        --- Quebra de Página: Folha {rdoData.folio_number} • Página {Math.floor(idx / 12) + 1} de {totalPages} ---
                       </div>
                     )}
                     <div className="flex items-center hover:bg-slate-50 transition">
-                      <span className="w-8 text-center font-bold text-[11px] text-slate-500 border-r border-slate-200 py-1 select-none">
+                      <span className="w-8 text-center font-bold text-[11px] text-slate-500 border-r border-slate-200 py-1.5 select-none">
                         {idx + 1}
                       </span>
                       <input
@@ -2272,7 +2272,7 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
                         value={lineText}
                         onChange={(e) => handleLineTextChange(idx, e.target.value)}
                         placeholder={idx === 0 && !isLocked ? 'Ex: EXECUÇÃO DE BSTC Ø0,60' : ''}
-                        className="flex-1 px-3 py-1 text-xs font-semibold text-slate-900 bg-transparent outline-none focus:bg-amber-50/40 uppercase disabled:text-slate-900"
+                        className="flex-1 px-3 py-1.5 text-[11px] font-semibold text-slate-900 bg-transparent outline-none focus:bg-amber-50/40 uppercase disabled:text-slate-900"
                       />
                     </div>
                   </React.Fragment>
@@ -2372,12 +2372,12 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
             </div>
 
             {/* Observações da Contratada */}
-            <div className="border border-slate-900 p-2 space-y-1">
+            <div className="border border-slate-900 p-2.5 space-y-1.5">
               <span className="block font-bold text-[10px] text-slate-800 uppercase">
                 OBSERVAÇÕES DA CONTRATADA:
               </span>
               <textarea
-                rows={2}
+                rows={3}
                 disabled={isLocked}
                 value={rdoData.contractor_notes || ''}
                 onChange={(e) => setRdoData({ ...rdoData, contractor_notes: e.target.value })}
@@ -2387,12 +2387,12 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
             </div>
 
             {/* Observações da Supervisora */}
-            <div className="border border-slate-900 p-2 space-y-1">
+            <div className="border border-slate-900 p-2.5 space-y-1.5">
               <span className="block font-bold text-[10px] text-slate-800 uppercase">
                 OBSERVAÇÕES DA SUPERVISORA:
               </span>
               <textarea
-                rows={2}
+                rows={3}
                 disabled={isLocked}
                 value={rdoData.supervisor_notes || ''}
                 onChange={(e) => setRdoData({ ...rdoData, supervisor_notes: e.target.value })}
@@ -2402,12 +2402,12 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
             </div>
 
             {/* Observações do Fiscal do DER/PR */}
-            <div className="border border-slate-900 p-2 space-y-1">
+            <div className="border border-slate-900 p-2.5 space-y-1.5">
               <span className="block font-bold text-[10px] text-slate-800 uppercase">
                 OBSERVAÇÕES DO FISCAL DO DER/PR:
               </span>
               <textarea
-                rows={2}
+                rows={3}
                 disabled={isLocked}
                 value={rdoData.fiscal_notes || ''}
                 onChange={(e) => setRdoData({ ...rdoData, fiscal_notes: e.target.value })}
