@@ -36,3 +36,9 @@
   background: #94a3b8;
 }
 
+
+/* Oculta o botão nativo de "revelar senha" do Edge (o sistema já tem o próprio botão) */
+input::-ms-reveal,
+input::-ms-clear {
+  display: none;
+}
