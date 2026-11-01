@@ -1,19 +1,29 @@
 # Relatório de Análise Técnica — AXIS OBRA
 
-**Data da análise:** 01/11/2026
-**Branch analisada:** `claude/finish-repository-l1vcze` (último commit `deaf4b7` — módulo RDO + Configurações)
+**Data da análise:** 01/11/2026 (2ª revisão)
+**Base analisada:** `origin/main` em `4c1cfdd` — *feat(occurrences): add photo attachments, SLA/lead-time KPIs and status reports*
 **Objetivo:** documentar o estado atual do sistema e orientar a continuidade do desenvolvimento (handoff para outro agente/desenvolvedor).
+
+> **O que mudou desde a 1ª análise (`deaf4b7`)** — 8 commits na `main`:
+> - **RDO:** comportamento de referência sem seed artificial, geração em lote (3 opções), filtro rápido mês/ano, calendário interativo com marcação de dias com foto/RDO, finalização/reabertura da folha, banner configurável do Módulo 8 no cabeçalho, impressão ajustada para 1 folha A4 (12 linhas de serviço, fonte 11).
+> - **UI:** layout responsivo para celular/tablet, menu lateral em gaveta (slide-over) e barra de navegação inferior.
+> - **Ocorrências:** anexos fotográficos por fase (registro/tratativa/conclusão), histórico de mudança de status, prazo (`due_date`), data de resolução (`resolved_at`), indicadores de SLA/lead time e relatórios por status (PDF/Excel).
+>
+> **Status dos problemas da 1ª análise:** nenhum dos itens de segurança, o bug B1 ou as pendências de documentação foram corrigidos. Os itens continuam abaixo, com **novos achados** marcados como 🆕.
 
 ---
 
 ## 1. Resumo executivo
 
-O AXIS OBRA é um sistema web de gestão de obras (foco em obras rodoviárias / padrão DER/PR) com **8 módulos funcionais** já implementados. O projeto **instala, compila e executa sem erros**:
+O AXIS OBRA é um sistema web de gestão de obras (foco em obras rodoviárias / padrão DER/PR) com **8 módulos funcionais**. Na revisão atual o projeto **instala, compila e executa sem erros**:
 
-- `npm run build` → build do frontend OK (Vite 6, ~494 KB JS / 40 KB CSS).
-- `node backend/src/server.js` → banco SQLite criado e populado (seed), `/api/health` OK, login OK, rotas autenticadas OK.
+- `npm run build` → OK (Vite 6, **~580 KB JS** / 49 KB CSS — cresceu ~86 KB desde a análise anterior).
+- `node backend/src/server.js` → banco criado e populado, `/api/health` OK, login OK, rotas novas de RDO em lote e anexos de ocorrência OK.
 
-O sistema está **funcional para demonstração**, mas **não está pronto para produção** por questões de **segurança de autenticação** (seção 5.1). Além disso há **1 bug funcional confirmado** (rota inexistente), lacunas de gestão de usuários e documentação desatualizada.
+O sistema está **funcional para demonstração**, mas **não está pronto para produção**:
+- a autenticação continua burlável (login sem senha e cabeçalho `x-user-id`) — **confirmado por teste**;
+- 🆕 o "bloqueio" de RDO finalizado existe **só na tela**: pelo backend qualquer usuário da obra edita ou exclui uma folha finalizada — **confirmado por teste**;
+- 🆕 o upload de fotos de ocorrência aceita **SVG**, permitindo XSS armazenado — **confirmado por teste**.
 
 ---
 
@@ -24,8 +34,8 @@ O sistema está **funcional para demonstração**, mas **não está pronto para 
 | Backend | Node.js **≥ 22.5** (usa `node:sqlite` nativo, experimental), Express 4, Multer, CORS |
 | Banco | SQLite em modo WAL — arquivo `backend/data/axis_obra.db` (ignorado no git) |
 | Frontend | React 18, Vite 6, Tailwind CSS 3, lucide-react (SPA sem roteador; navegação por estado em `App.jsx`) |
-| Uploads | Disco local em `backend/uploads/` (servido em `/uploads`) |
-| Auth | Token próprio `base64url(payload).HMAC-SHA256` em `Authorization: Bearer` |
+| Uploads | Disco local em `backend/uploads/` (servido em `/uploads`). Fotos de ocorrência chegam em **base64 no JSON** e são gravadas por `saveBase64Image()` |
+| Auth | Token próprio `base64url(payload).HMAC-SHA256` em `Authorization: Bearer` (+ cabeçalho `x-user-id`, ver S2) |
 | Deploy | `Dockerfile` (node:22-alpine) + `docker-compose.yml` (volumes `data` e `uploads`), Coolify, PM2 (`ecosystem.config.cjs` + `deploy.sh`), template GitHub Actions em `deploy/github-actions-deploy.yml` |
 
 **Comandos:**
@@ -36,7 +46,7 @@ npm run start:frontend     # Vite dev em :5173 (proxy /api e /uploads -> :3001)
 npm run build              # build de produção; o backend serve frontend/dist
 ```
 
-Em produção (`NODE_ENV=production`) o servidor escuta também nas portas 80 e 3000 (compatibilidade Traefik/Coolify) — `backend/src/server.js:2072`.
+Em produção (`NODE_ENV=production`) o servidor escuta também nas portas 80 e 3000 (compatibilidade Traefik/Coolify), no final de `backend/src/server.js`.
 
 **Contas de demonstração (senha `123456`):** `admin@axisobra.com.br` (ADMIN), `mariana@axisobra.com.br`, `roberto@axisobra.com.br` (ENGENHEIRO), `joao@axisobra.com.br` (ENCARREGADO).
 
@@ -45,25 +55,25 @@ Em produção (`NODE_ENV=production`) o servidor escuta também nas portas 80 e 
 ## 3. Estrutura do código
 
 ```
-backend/src/db.js        (~1.000 linhas) schema, migrations "ensure*Columns", seeds de demonstração
-backend/src/server.js    (~2.100 linhas) TODAS as rotas da API em um único arquivo
-frontend/src/App.jsx     login, sidebar, filtro global de obra, troca de módulos
+backend/src/db.js        (~1.180 linhas) schema, migrations "ensure*Columns", seeds de demonstração
+backend/src/server.js    (~2.440 linhas, 53 rotas) TODAS as rotas da API em um único arquivo
+frontend/src/App.jsx     (~690) login, sidebar/gaveta mobile, barra inferior, filtro global de obra
 frontend/src/api.js      apiRequest(), sessão em localStorage, formatadores (BRL, data BR)
 frontend/src/components/
-  DashboardView.jsx      Painel consolidado
-  PhotosView.jsx         Módulo 1 - Registro Fotográfico
-  PhotoReportModal.jsx   Relatório fotográfico (PDF via window.print / Excel via HTML-xls)
-  RdoView.jsx            Módulo 2 - Diário de Obras (RDO DER/PR), impressão/PDF
-  OccurrencesView.jsx    Módulo 3 - Ocorrências (+ gerenciador de campos)
-  EmployeesView.jsx      Módulo 4 - Funcionários
-  EquipmentsView.jsx     Módulo 5 - Equipamentos
-  ProjectsUsersView.jsx  Módulo 6 - Obras e matriz de acesso por usuário
-  PluviometryView.jsx    Módulo 7 - Pluviometria (CSV INMET, gráficos, 4 quadros, PDF/Excel)
-  SettingsView.jsx       Módulo 8 - Configurações (parâmetros de ocorrência, cabeçalhos de relatório)
+  DashboardView.jsx      (~380)  Painel consolidado
+  PhotosView.jsx         (~1.460) Módulo 1 - Registro Fotográfico
+  PhotoReportModal.jsx   (~1.240) Relatório fotográfico (PDF via window.print / Excel via HTML-xls)
+  RdoView.jsx            (~2.700) Módulo 2 - RDO DER/PR: calendário, lote, finalização, impressão
+  OccurrencesView.jsx    (~3.010) Módulo 3 - Ocorrências: anexos, histórico, SLA, relatórios
+  EmployeesView.jsx      (~580)  Módulo 4 - Funcionários
+  EquipmentsView.jsx     (~600)  Módulo 5 - Equipamentos
+  ProjectsUsersView.jsx  (~870)  Módulo 6 - Obras e matriz de acesso por usuário
+  PluviometryView.jsx    (~2.700) Módulo 7 - Pluviometria (CSV INMET, gráficos, 4 quadros, PDF/Excel)
+  SettingsView.jsx       (~890)  Módulo 8 - Configurações (parâmetros de ocorrência, cabeçalhos de relatório)
 ```
 
-### 3.1 Tabelas do banco (11)
-`users`, `projects`, `project_users` (N:N obra×usuário), `employees`, `equipments`, `photos`, `occurrences`, `pluviometry`, `occurrence_params` (opções configuráveis TYPE/SEVERITY/STATUS/SECTOR), `report_settings` (linha única `id=1`: cabeçalho/rodapé/contrato dos relatórios), `rdo_records` (único por `project_id + rdo_date`, `folio_number` sequencial por obra, `services_developed` em JSON).
+### 3.1 Tabelas do banco (13)
+`users`, `projects`, `project_users` (N:N obra×usuário), `employees`, `equipments`, `photos`, `occurrences` (+ `due_date`, `resolved_at`, `updated_at`), 🆕 `occurrence_photos` (anexos com `phase` REGISTRO/TRATATIVA/CONCLUSAO), 🆕 `occurrence_history` (trilha de mudanças de status), `pluviometry`, `occurrence_params` (opções configuráveis TYPE/SEVERITY/STATUS/SECTOR, com flags `is_resolved`/`is_critical`), `report_settings` (linha única `id=1`), `rdo_records` (único por `project_id + rdo_date`; + `final_signature`, `finalized_at`, `reopened_reason`; status agora `draft`/`final`).
 
 Migrations são feitas por funções `ensure*Columns()` que rodam `ALTER TABLE ADD COLUMN` se a coluna não existir. Não há ferramenta de migration versionada.
 
@@ -76,14 +86,15 @@ Migrations são feitas por funções `ensure*Columns()` que rodam `ALTER TABLE A
 - Equipamentos: `GET/POST /api/equipments`, `PUT/DELETE /api/equipments/:id`
 - Relatórios: `GET/PUT /api/report-settings`
 - Fotos: `GET/POST /api/photos`, `PUT/DELETE /api/photos/:id`
-- Ocorrências: `GET/POST /api/occurrence-params`, `PUT/DELETE /api/occurrence-params/:id`, `GET/POST /api/occurrences`, `PUT/DELETE /api/occurrences/:id`
-- RDO: `GET /api/rdo`, `GET /api/rdo/by-date`, `POST /api/rdo` (upsert), `POST /api/rdo/sync-services`, `DELETE /api/rdo/:id`
+- Ocorrências: `GET/POST /api/occurrence-params`, `PUT/DELETE /api/occurrence-params/:id`, `GET/POST /api/occurrences`, `PUT/DELETE /api/occurrences/:id`, 🆕 `GET /api/occurrences/:id/history`, 🆕 `POST /api/occurrences/:id/photos`, 🆕 `PUT/DELETE /api/occurrence-photos/:photoId`
+- RDO: `GET /api/rdo` (🆕 `fromDate`, `toDate`, `order`), `GET /api/rdo/by-date` (🆕 `exists`, `suggested_services`), `POST /api/rdo` (upsert), 🆕 `POST /api/rdo/batch`, 🆕 `GET /api/rdo/photo-dates`, `POST /api/rdo/sync-services`, `DELETE /api/rdo/:id`
 - Pluviometria: `GET/POST /api/pluviometry`, `PUT/DELETE /api/pluviometry/:id`, `POST /api/pluviometry/batch`
 
 ### 3.3 Controle de acesso (RBAC)
 - Perfis: `ADMIN`, `ENGENHEIRO`, `ENCARREGADO`, `FISCAL`.
 - `ADMIN` acessa todas as obras; demais perfis só as vinculadas em `project_users`.
-- Helpers: `getUserAccessibleProjectIds()` e `canUserAccessProject()` (`server.js:55-71`), middleware `authenticate` (`server.js:74`).
+- Helpers `getUserAccessibleProjectIds()` e `canUserAccessProject()` e middleware `authenticate` no topo de `server.js`.
+- **Não existe distinção de permissão por perfil dentro da obra** (ex.: ENCARREGADO pode finalizar, reabrir e excluir RDO, alterar configurações globais etc.).
 
 ---
 
@@ -93,72 +104,99 @@ Migrations são feitas por funções `ensure*Columns()` que rodam `ALTER TABLE A
 |---|---|---|
 | Painel Consolidado | ✅ Implementado | Indicadores filtrados pela obra selecionada / permissões |
 | 1. Registro Fotográfico | ✅ Implementado | Upload múltiplo, edição, agrupamento ano/mês/data/etapa, ordenação, relatório A4 PDF/Excel |
-| 2. RDO (DER/PR) | ✅ Implementado (recente) | Upsert por data, folha sequencial, importa serviços dos títulos das fotos do dia, impressão/PDF |
-| 3. Ocorrências | ✅ Implementado | Campos configuráveis, avanço rápido de status |
+| 2. RDO (DER/PR) | ⚠️ Implementado, regras só no frontend | Calendário, lote (dias com foto / período completo), finalização. **Bloqueio de folha final e numeração não validados no backend** (R1–R3) |
+| 3. Ocorrências | ⚠️ Implementado, upload inseguro | Anexos por fase, histórico, SLA/lead time, relatórios. **SVG aceito, base64 sem compressão** (S10, O1) |
 | 4. Funcionários | ✅ Implementado | CLT/terceiro/PJ, ASO, NRs, diária |
 | 5. Equipamentos | ✅ Implementado | Próprio/locado, manutenção preventiva |
 | 6. Obras por Usuário | ⚠️ Parcial | Cria obra/usuário e vínculos; **não edita/desativa usuário nem troca senha** |
 | 7. Pluviometria | ✅ Implementado | CSV INMET, lote, gráfico diário/mensal, 4 quadros analíticos PDF/Excel |
-| 8. Configurações | ⚠️ Com bug | Botão "restaurar padrão" chama rota inexistente (ver 5.2) |
+| 8. Configurações | ⚠️ Com bug | Botão "restaurar padrão" chama rota inexistente (B1) |
+| UI responsiva | ✅ Novo | Gaveta lateral + barra inferior no mobile |
 
 ---
 
 ## 5. Problemas encontrados (priorizados)
 
-### 5.1 🔴 CRÍTICO — Segurança de autenticação (bloqueia produção)
+Legenda: ✔ = confirmado por teste executado nesta análise.
+
+### 5.1 🔴 CRÍTICO — Segurança (bloqueia produção)
 
 | # | Problema | Local | Correção sugerida |
 |---|---|---|---|
-| S1 | Login aceita apenas `userId` **sem senha** ("troca rápida de perfil"). Qualquer pessoa vira ADMIN com `{"userId":1}` | `server.js:138-145` | Permitir só quando `DEMO_MODE=true` (variável de ambiente); desligado por padrão |
-| S2 | Middleware aceita cabeçalho `x-user-id` como autenticação **sem token** | `server.js:83-85` e `frontend/src/api.js:35-37` | Remover do backend e do frontend; aceitar apenas Bearer token |
-| S3 | `GET /api/auth/demo-users` é público e expõe nomes/e-mails/perfis de todos os usuários | `server.js:114` | Só responder com `DEMO_MODE=true`; frontend esconde o bloco "Acesso Rápido" quando a lista vier vazia/404 |
-| S4 | `GET /api/users` não exige ADMIN (qualquer logado lista todos os usuários) | `server.js:537` | Restringir a ADMIN |
-| S5 | `TOKEN_SECRET` com valor padrão fixo no código | `server.js:31` | Exigir via env em produção (falhar na inicialização se ausente) ou gerar e persistir em `backend/data/` |
-| S6 | Senha com SHA-256 + salt fixo global | `db.js:23-25` | `crypto.scrypt` com salt aleatório por usuário (formato `scrypt$salt$hash`), mantendo compatibilidade/migração com hashes antigos no login |
-| S7 | Tela de login vem pré-preenchida com `admin@...` / `123456` e rótulo "Senha (padrão: 123456)" | `App.jsx:60-61` e rótulo do campo | Campos vazios fora do modo demo |
-| S8 | `PUT /api/report-settings` e CRUD de `occurrence-params` sem verificação de perfil (qualquer usuário altera configurações globais) | `server.js:953`, `1279-1376` | Restringir a ADMIN (ou ADMIN+ENGENHEIRO, decidir regra) |
-| S9 | `POST /api/rdo/sync-services` não chama `canUserAccessProject` (lê títulos de fotos de obra alheia) | `server.js:1765` | Adicionar a checagem |
-| S10 | Upload sem `fileFilter` (aceita qualquer tipo de arquivo; extensão vem do nome original) | `server.js:20-28` | Validar mimetype `image/*` (jpg, png, webp); considerar bloquear SVG (risco XSS) |
-| S11 | `cors()` aberto para qualquer origem | `server.js:14` | Restringir por env (`CORS_ORIGIN`) ou desabilitar (frontend é servido pelo mesmo host) |
-| S12 | Sem limite de tentativas de login | `server.js:138` | Rate limit simples em memória por IP/e-mail |
+| S1 ✔ | Login aceita apenas `{"userId":1}` **sem senha** e devolve token de ADMIN | `POST /api/auth/login` | Permitir só com `DEMO_MODE=true` (variável de ambiente), desligado por padrão |
+| S2 ✔ | Middleware aceita cabeçalho `x-user-id` como autenticação **sem token** (o frontend envia em toda requisição) | `authenticate` em `server.js` e `frontend/src/api.js:35-37` | Remover dos dois lados; aceitar apenas Bearer token |
+| S3 | `GET /api/auth/demo-users` é público e expõe nomes/e-mails/perfis | `server.js` (rota pública) | Só responder com `DEMO_MODE=true`; frontend oculta "Acesso Rápido" quando vier vazio/404 |
+| S4 ✔ | `GET /api/users` não exige ADMIN (ENCARREGADO listou todos os usuários) | `GET /api/users` | Restringir a ADMIN |
+| S5 | `TOKEN_SECRET` com valor padrão fixo no código | topo de `server.js` | Exigir via env em produção ou gerar e persistir em `backend/data/` |
+| S6 | Senha com SHA-256 + salt fixo global | `hashPassword()` em `db.js` | `crypto.scrypt` com salt por usuário (`scrypt$salt$hash`), migrando hashes antigos no login |
+| S7 | Login pré-preenchido com `admin@...` / `123456` e rótulo "Senha (padrão: 123456)" | `App.jsx` (estado inicial do formulário) | Campos vazios fora do modo demo |
+| S8 | `PUT /api/report-settings` e CRUD de `occurrence-params` sem verificação de perfil | `server.js` | Restringir a ADMIN (ou ADMIN+ENGENHEIRO) |
+| S9 ✔ | `POST /api/rdo/sync-services` não chama `canUserAccessProject` (ENCARREGADO consultou obra 2 sem vínculo → 200) | `server.js` (~linha 2111) | Adicionar a checagem |
+| S10 ✔ 🆕 | **XSS armazenado via SVG**: `saveBase64Image()` aceita `data:image/svg+xml` e grava `.svg` servido no mesmo domínio (SVG com `onload` foi aceito). O upload via Multer (`/api/photos`) também não tem `fileFilter` | `saveBase64Image()` e config do Multer em `server.js` | Lista branca `jpg/png/webp`, validar assinatura do arquivo (magic bytes), limite de tamanho por imagem; servir `/uploads` com `X-Content-Type-Options: nosniff` e `Content-Security-Policy: sandbox` |
+| S11 | `cors()` aberto para qualquer origem | topo de `server.js` | Restringir por env (`CORS_ORIGIN`) ou desabilitar (front e API no mesmo host) |
+| S12 | Sem limite de tentativas de login | `POST /api/auth/login` | Rate limit simples em memória por IP/e-mail |
 
-### 5.2 🟠 Bug funcional confirmado
-- **B1** — `SettingsView.jsx:169` chama `POST /api/occurrence-params/reset`, **rota que não existe** no backend → retorna o HTML da SPA / erro. Implementar a rota (ADMIN) reaproveitando `seedOccurrenceParamsIfEmpty()` de `db.js:372` (apagar e repopular), ou remover o botão.
+### 5.2 🟠 Regras de negócio do RDO só no frontend 🆕
 
-### 5.3 🟡 Funcionalidades faltantes
-- **F1** — Gestão de usuários: `PUT /api/users/:id` (nome, e-mail, perfil, CREA/CFT, telefone, ativo), desativar/reativar, redefinir senha (ADMIN) e "alterar minha senha" (`PUT /api/auth/password`, usuário logado com senha atual). Telas em `ProjectsUsersView.jsx` + item no menu do usuário em `App.jsx`.
-- **F2** — `GET /api/auth/me` deveria ser usado na inicialização para validar o token salvo (hoje o usuário vem só do `localStorage`; token expirado só aparece como erro 401 nas telas). Tratar 401 global em `apiRequest` → limpar sessão e voltar ao login.
-- **F3** — Backup: endpoint/rotina para exportar o `.db` + uploads (dados críticos de obra em SQLite local).
+| # | Problema | Correção sugerida |
+|---|---|---|
+| R1 ✔ | **Folha finalizada não é bloqueada no backend.** Com o RDO em `status: final`, um ENCARREGADO alterou `contractor_notes` via `POST /api/rdo` e depois **excluiu** a folha via `DELETE /api/rdo/:id`, ambos com sucesso | No upsert: se o registro existente estiver `final`, recusar alterações (409), exceto reabertura explícita com `reopened_reason` obrigatório; `DELETE` recusado para folha final |
+| R2 | Qualquer perfil pode finalizar e reabrir; a reabertura grava motivo fixo "Reaberto para correções manuais." (`RdoView.jsx:541`) | Definir quem pode finalizar/reabrir (ex.: ENGENHEIRO/ADMIN), pedir motivo ao usuário e registrar histórico (tabela `rdo_history`, no mesmo padrão de `occurrence_history`) |
+| R3 ✔ | **Numeração de folha (`folio_number`) vem do cliente e não é validada:** foi possível criar outra data com o mesmo nº de folha 1 | Calcular a folha no servidor (`MAX+1`) em novos registros; índice `UNIQUE(project_id, folio_number)` |
+| R4 | `POST /api/rdo/batch` lê `settings.supervisorNotes` e `settings.inspectorNotes`, **colunas inexistentes** em `report_settings` (as colunas são snake_case) — sempre cai no valor padrão | Usar as colunas reais ou removê-las |
+| R5 | Status mudou de `EM_ANDAMENTO` para `draft`/`final`, sem migração de registros antigos em bancos de produção | Migração `UPDATE rdo_records SET status='draft' WHERE status NOT IN ('draft','final')` |
+| R6 | Geração em lote não roda em transação (falha no meio deixa lote parcial) | Envolver em `BEGIN`/`COMMIT` |
 
-### 5.4 🔵 Documentação e consistência
-- **D1** — Tela de login (`App.jsx`, bloco "6 Modules Checklist") lista 6 módulos; o sistema tem 8 (faltam RDO e Configurações, e a numeração diverge do menu).
+### 5.3 🟠 Bugs funcionais
+
+- **B1 ✔** — `SettingsView.jsx:169` chama `POST /api/occurrence-params/reset`, **rota que não existe** (teste: 404 com HTML). Implementar a rota (ADMIN) reaproveitando `seedOccurrenceParamsIfEmpty()` de `db.js`, ou remover o botão.
+- **B2 🆕** — Tela de login continua listando **6 módulos** com numeração diferente do menu (`App.jsx:181-186`).
+
+### 5.4 🟡 Funcionalidades faltantes
+- **F1** — Gestão de usuários: `PUT /api/users/:id` (nome, e-mail, perfil, CREA/CFT, telefone, ativo), desativar/reativar, redefinir senha (ADMIN) e "alterar minha senha" (`PUT /api/auth/password`). Telas em `ProjectsUsersView.jsx` e no menu do usuário.
+- **F2** — Validar a sessão salva com `GET /api/auth/me` ao abrir o app e tratar **401 globalmente** em `apiRequest` (limpar sessão e voltar ao login).
+- **F3** — Backup: exportar o `.db` + `uploads/` (dados de obra críticos em SQLite local).
+- **F4 🆕** — Permissões por perfil dentro da obra (ver 3.3): FISCAL deveria ser somente leitura; ENCARREGADO sem excluir/finalizar.
+
+### 5.5 🔵 Performance e armazenamento 🆕
+- **O1** — Fotos de ocorrência são lidas com `FileReader.readAsDataURL` (`OccurrencesView.jsx:143`) e enviadas em base64 **sem redimensionar**. Até 20 fotos por requisição dentro do limite de JSON de 25 MB → fotos de celular (4–8 MB cada) estouram o limite e pesam no banco/disco. Redimensionar no cliente (canvas, lado maior ~1600 px, JPEG ~0,8) ou trocar para `multipart` com Multer, como já é feito em `/api/photos`.
+- **O2** — Bundle único de ~580 KB: usar `React.lazy` por módulo (RDO, Ocorrências e Pluviometria juntos têm ~8.400 linhas).
+
+### 5.6 🔵 Documentação e consistência
+- **D1** — Tela de login desatualizada (ver B2).
 - **D2** — `README.md` lista 6 módulos e cita `.github/workflows/deploy.yml`, mas o arquivo está em `deploy/github-actions-deploy.yml` (precisa ser copiado para `.github/workflows/` para funcionar).
-- **D3** — `DOCUMENTACAO_SISTEMA.md` desatualizado: numeração de módulos inconsistente (sumário diz RDO = Módulo 2, corpo diz Ocorrências = Módulo 2), "8 tabelas" (são 11), faltam rotas de RDO, report-settings, occurrence-params, pluviometry batch/PUT e photos PUT.
-- **D4** — Documentar variáveis de ambiente (hoje só `PORT`, `NODE_ENV`, `TOKEN_SECRET`; propostas: `DEMO_MODE`, `CORS_ORIGIN`). Criar `.env.example`.
+- **D3** — `DOCUMENTACAO_SISTEMA.md` desatualizado: numeração de módulos inconsistente, "8 tabelas" (são 13), faltam rotas de RDO (incluindo lote, calendário e finalização), anexos/histórico de ocorrências, report-settings, occurrence-params, pluviometry batch/PUT e photos PUT.
+- **D4** — Documentar variáveis de ambiente (`PORT`, `NODE_ENV`, `TOKEN_SECRET`; propostas: `DEMO_MODE`, `CORS_ORIGIN`) em um `.env.example`.
+- **D5 🆕** — Arquivo vazio `backend/data/database.sqlite` foi versionado (o banco real é `axis_obra.db`). Remover do git.
+- **D6 🆕** — Código morto em `db.js`: `seedRdoIfEmpty()` agora só faz `return` e `_unusedSeedRdo()` (referencia variável `countRow` inexistente) nunca é chamada. Remover.
+- **D7 🆕** — Seeds de demonstração ainda criam ocorrências e anexos de exemplo (`ensureOccurrenceSeedExtras()`, que roda **em todo boot**) — em um banco de produção que tenha exatamente 4 ocorrências, insere 2 ocorrências fictícias. Restringir seeds a `DEMO_MODE`/banco novo.
 
-### 5.5 ⚪ Qualidade / dívida técnica (não bloqueante)
-- **Q1** — Sem testes automatizados. Sugestão mínima: `node:test` + `fetch` contra servidor com banco temporário (definir caminho do banco via env, ex. `DB_PATH`), cobrindo login, RBAC (usuário sem vínculo recebe 403) e CRUD principal.
+### 5.7 ⚪ Qualidade / dívida técnica (não bloqueante)
+- **Q1** — Sem testes automatizados. Sugestão mínima: `node:test` + `fetch` contra servidor com banco temporário (caminho do banco via env, ex. `DB_PATH`), cobrindo login, RBAC (sem vínculo → 403), bloqueio de RDO final, upload de imagem inválida e CRUD principal.
 - **Q2** — Sem ESLint/Prettier.
-- **Q3** — `server.js` monolítico (~2.100 linhas). Refatorar em `routes/*.js` quando houver testes.
-- **Q4** — Componentes muito grandes (`PluviometryView.jsx` ~2.700 linhas, `RdoView.jsx` ~1.600). Extrair geradores de PDF/Excel para `frontend/src/reports/`.
-- **Q5** — Bundle único de ~494 KB: usar `React.lazy` por módulo.
-- **Q6** — `node:sqlite` é experimental (aviso no log). Fixar versão do Node no Docker (`node:22.x-alpine`) para evitar quebra.
-- **Q7** — Dados de seed são específicos (contrato CO141/2025, PR-317, nomes reais em `ensureReportSettingsColumns`, `db.js:234+`). Avaliar se devem continuar como padrão em instalações novas.
+- **Q3** — `server.js` monolítico (~2.440 linhas, 53 rotas). Separar em `routes/*.js` depois que houver testes.
+- **Q4** — Componentes muito grandes (`OccurrencesView.jsx` ~3.000, `RdoView.jsx` ~2.700, `PluviometryView.jsx` ~2.700 linhas). Extrair geradores de PDF/Excel para `frontend/src/reports/` e subcomponentes.
+- **Q5** — `node:sqlite` é experimental (aviso no log). Fixar versão do Node no Docker (`node:22.x-alpine`).
+- **Q6** — Dados de seed específicos (contrato CO141/2025, PR-317, nomes de pessoas em `ensureReportSettingsColumns`). Avaliar se devem ser padrão em instalações novas.
 
 ---
 
 ## 6. Plano de continuação sugerido (ordem de execução)
 
-1. **Segurança (S1–S12)** + variável `DEMO_MODE` + `.env.example`.
-   *Aceite:* `POST /api/auth/login {"userId":1}` → 400/401 com `DEMO_MODE` desligado; requisição só com `x-user-id` → 401; ENGENHEIRO em `GET /api/users` → 403; login com senha correta continua funcionando para os usuários já existentes (migração de hash).
-2. **Bug B1** (rota de reset dos parâmetros).
-3. **F1 + F2** (gestão de usuários, troca de senha, validação de sessão / 401 global).
-4. **D1–D4** (login com 8 módulos, README, documentação, workflow do GitHub Actions no lugar certo).
-5. **Q1** (testes mínimos de API) → depois Q2–Q6.
+1. **Segurança (S1–S12)** + `DEMO_MODE` + `.env.example`.
+   *Aceite:* `POST /api/auth/login {"userId":1}` → 400/401 sem `DEMO_MODE`; requisição só com `x-user-id` → 401; ENCARREGADO em `GET /api/users` → 403; upload de SVG ou arquivo não-imagem → 400; login com senha correta continua funcionando para usuários existentes (migração de hash).
+2. **Regras do RDO no backend (R1–R6).**
+   *Aceite:* `POST /api/rdo` sobre folha `final` sem reabertura → 409; `DELETE` de folha final → 409; duas datas não podem ter o mesmo `folio_number` na mesma obra; reabertura exige motivo e fica registrada.
+3. **Bugs B1/B2.**
+4. **F1 + F2 + F4** (gestão de usuários, troca de senha, sessão/401 global, permissões por perfil).
+5. **O1** (compressão/multipart das fotos de ocorrência).
+6. **D1–D7** (login com 8 módulos, README, documentação, workflow no lugar certo, limpeza de arquivo/código morto, seeds só em demo).
+7. **Q1** (testes mínimos de API) → depois Q2–Q6 e O2.
 
 ### Regras para quem continuar
-- Interface e mensagens em **português do Brasil**; manter o padrão visual (Tailwind, paleta slate/amber).
-- Não versionar `backend/data/*.db` nem `backend/uploads/*` (já no `.gitignore`).
-- Migrations sempre **aditivas** (padrão `ensure*Columns`) — o banco de produção não pode ser recriado.
-- Sempre validar `canUserAccessProject()` em qualquer rota que receba `project_id` ou id de registro vinculado a obra.
-- Validar com `npm run build` e subir o backend (`PORT=3999 node backend/src/server.js`) testando `/api/health` e login antes de cada commit.
+- Interface e mensagens em **português do Brasil**; manter o padrão visual (Tailwind, paleta slate/amber) e o layout responsivo novo.
+- Não versionar `backend/data/*` nem `backend/uploads/*`.
+- Migrations sempre **aditivas** (padrão `ensure*Columns`) — o banco de produção não pode ser recriado; mudanças de valores (ex.: status) exigem migração explícita.
+- Toda regra de negócio aplicada na tela (bloqueios, numeração, permissões) deve ser **repetida no backend**.
+- Sempre validar `canUserAccessProject()` em qualquer rota que receba `project_id` ou id de registro ligado a obra.
+- Antes de cada commit: `npm run build` e subir o backend (`PORT=3999 node backend/src/server.js`) testando `/api/health` e login.
