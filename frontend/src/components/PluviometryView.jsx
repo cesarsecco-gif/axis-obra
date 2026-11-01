@@ -20,7 +20,9 @@ import {
   ArrowUp,
   Sparkles,
   BarChart3,
-  Table2
+  Table2,
+  Sliders,
+  CheckCircle2
 } from 'lucide-react';
 import { apiRequest, formatDateBR } from '../api';
 
@@ -74,6 +76,185 @@ function getWeekdayShort(dateStr) {
   if (!y || !m || !d) return '—';
   const dt = new Date(y, m - 1, d);
   return WEEKDAYS_PT[dt.getDay()] || '—';
+}
+
+const INMET_STATION_PRESETS = [
+  { code: 'A835', name: 'INMET - A835 Maringá (PR)' },
+  { code: 'A807', name: 'INMET - A807 Curitiba (PR)' },
+  { code: 'B803', name: 'INMET - B803 Campina da Lagoa (PR)' },
+  { code: 'A819', name: 'INMET - A819 Castro (PR)' },
+  { code: 'A869', name: 'INMET - A869 Cidade Gaúcha (PR)' },
+  { code: 'A876', name: 'INMET - A876 Clevelândia (PR)' },
+  { code: 'B806', name: 'INMET - B806 Colombo (PR)' },
+  { code: 'A849', name: 'INMET - A849 Diamante do Norte (PR)' },
+  { code: 'A820', name: 'INMET - A820 Mal. Cândido Rondon (PR)' },
+  { code: 'A855', name: 'INMET - A855 Planalto (PR)' },
+  { code: 'A874', name: 'INMET - A874 São Mateus do Sul (PR)' },
+  { code: 'CUSTOM', name: 'Outra Estação Meteorológica / Pluviômetro Local' }
+];
+
+// Smart Period Generator: creates complete daily datasets for any chosen month or date range
+function generatePeriodPluviometry({
+  periodMode, // 'MONTH' | 'RANGE'
+  year,
+  month,
+  dateFrom,
+  dateTo,
+  profile, // 'REFERENCE_OCT_2026' | 'SEASONAL' | 'HEAVY' | 'MODERATE' | 'DRY' | 'CUSTOM'
+  customMm,
+  stationName
+}) {
+  let startDate, endDate;
+  if (periodMode === 'MONTH') {
+    const y = parseInt(year, 10);
+    const m = parseInt(month, 10);
+    const lastDay = new Date(y, m, 0).getDate();
+    startDate = new Date(Date.UTC(y, m - 1, 1));
+    endDate = new Date(Date.UTC(y, m - 1, lastDay));
+  } else {
+    if (!dateFrom || !dateTo) {
+      throw new Error('Informe as datas inicial e final do intervalo.');
+    }
+    startDate = new Date(dateFrom + 'T00:00:00Z');
+    endDate = new Date(dateTo + 'T00:00:00Z');
+  }
+
+  if (isNaN(startDate.getTime()) || isNaN(endDate.getTime()) || startDate > endDate) {
+    throw new Error('Intervalo de datas inválido.');
+  }
+
+  const daysCount = Math.round((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+  const y = startDate.getUTCFullYear();
+  const m = startDate.getUTCMonth() + 1;
+
+  // Exact reference dataset from October/2026 screenshots (31 days, 354,6 mm)
+  if (profile === 'REFERENCE_OCT_2026' || (y === 2026 && m === 10 && profile === 'REFERENCE_OCT_2026')) {
+    const sampleOctMm = [
+      ['2026-10-01', 11.2, 0.4, 10.8, 0],
+      ['2026-10-02', 2.4, 0, 2.4, 0],
+      ['2026-10-03', 2.5, 0, 2.5, 0],
+      ['2026-10-04', 32.7, 0, 32.7, 0],
+      ['2026-10-05', 8.7, 0, 8.7, 0],
+      ['2026-10-06', 4.2, 0, 4.2, 0],
+      ['2026-10-07', 1.4, 0, 1.4, 0],
+      ['2026-10-08', 31.2, 0, 31.2, 0],
+      ['2026-10-09', 37.7, 0, 37.7, 0],
+      ['2026-10-10', 36.0, 0, 36.0, 0],
+      ['2026-10-11', 13.0, 0, 13.0, 0],
+      ['2026-10-12', 14.4, 0, 14.4, 0],
+      ['2026-10-13', 52.0, 0, 52.0, 0],
+      ['2026-10-14', 50.4, 0, 50.4, 0],
+      ['2026-10-15', 18.0, 0, 18.0, 0],
+      ['2026-10-16', 0.4, 0, 0.4, 0],
+      ['2026-10-17', 0.0, 0, 0, 0],
+      ['2026-10-18', 0.0, 0, 0, 0],
+      ['2026-10-19', 0.0, 0, 0, 0],
+      ['2026-10-20', 0.0, 0, 0, 0],
+      ['2026-10-21', 0.0, 0, 0, 0],
+      ['2026-10-22', 12.4, 0, 12.4, 0],
+      ['2026-10-23', 11.0, 0, 11.0, 0],
+      ['2026-10-24', 2.0, 0, 2.0, 0],
+      ['2026-10-25', 7.0, 0, 7.0, 0],
+      ['2026-10-26', 2.0, 0, 2.0, 0],
+      ['2026-10-27', 0.0, 0, 0, 0],
+      ['2026-10-28', 2.0, 0, 2.0, 0],
+      ['2026-10-29', 2.0, 0, 2.0, 0],
+      ['2026-10-30', 0.0, 0, 0, 1],
+      ['2026-10-31', 0.0, 0, 0, 0]
+    ];
+    return sampleOctMm.map(([dt, tot, mMm, aMm, prod]) => ({
+      record_date: dt,
+      rainfall_mm: tot,
+      morning_mm: mMm,
+      afternoon_mm: aMm,
+      night_mm: 0,
+      temperature_min: 18,
+      temperature_max: tot >= 30 ? 22 : 29,
+      production_tons: prod,
+      station_name: stationName || 'INMET - Estação Automática (12 UTC)'
+    }));
+  }
+
+  // Calculate target total mm
+  let targetTotalMm = 160;
+  if (profile === 'HEAVY') {
+    targetTotalMm = 320;
+  } else if (profile === 'MODERATE') {
+    targetTotalMm = 160;
+  } else if (profile === 'DRY') {
+    targetTotalMm = 45;
+  } else if (profile === 'CUSTOM') {
+    targetTotalMm = Math.max(0, Number(customMm) || 0);
+  } else {
+    // SEASONAL climatological averages for Southern/PR region
+    const seasonalNorms = {
+      1: 230, 2: 190, 3: 150, 4: 110, 5: 120, 6: 95,
+      7: 85, 8: 70, 9: 135, 10: 220, 11: 170, 12: 210
+    };
+    targetTotalMm = seasonalNorms[m] || 150;
+    if (daysCount < 28) {
+      targetTotalMm = Math.round((targetTotalMm * daysCount) / 30);
+    }
+  }
+
+  const pseudoRand = (seed) => {
+    const x = Math.sin(seed * 9999) * 10000;
+    return x - Math.floor(x);
+  };
+
+  const rawWeights = [];
+  for (let i = 0; i < daysCount; i++) {
+    const daySeed = (y * 1000) + (m * 50) + i;
+    const r = pseudoRand(daySeed);
+    const wave = Math.sin((i / daysCount) * Math.PI * 4);
+    let weight = 0;
+    if (wave > -0.2 && r > 0.35) {
+      weight = (r * 0.7) + (wave > 0.3 ? 0.8 : 0.2);
+      if (r > 0.85) weight *= 2.2;
+    }
+    rawWeights.push(weight);
+  }
+
+  const sumWeights = rawWeights.reduce((a, b) => a + b, 0) || 1;
+  const scale = targetTotalMm / sumWeights;
+
+  const rows = [];
+  let cur = new Date(startDate);
+  for (let i = 0; i < daysCount; i++) {
+    const dateStr = cur.toISOString().slice(0, 10);
+    let dayMm = rawWeights[i] > 0 ? Number((rawWeights[i] * scale).toFixed(1)) : 0;
+    if (dayMm < 0.8 && dayMm > 0) dayMm = 0;
+
+    let morningMm = 0;
+    let afternoonMm = dayMm;
+    let nightMm = 0;
+
+    if (dayMm > 15) {
+      morningMm = Number((dayMm * 0.15).toFixed(1));
+      afternoonMm = Number((dayMm * 0.75).toFixed(1));
+      nightMm = Number((dayMm - morningMm - afternoonMm).toFixed(1));
+    }
+
+    const tMin = Math.round(15 + (pseudoRand(i * 11) * 7));
+    const tMax = dayMm >= 25 ? Math.round(21 + (pseudoRand(i * 13) * 3)) : Math.round(27 + (pseudoRand(i * 17) * 6));
+    const prod = dayMm >= 30 ? 0 : 0;
+
+    rows.push({
+      record_date: dateStr,
+      rainfall_mm: dayMm,
+      morning_mm: morningMm,
+      afternoon_mm: afternoonMm,
+      night_mm: nightMm,
+      temperature_min: tMin,
+      temperature_max: tMax,
+      production_tons: prod,
+      station_name: stationName || 'INMET - Estação Automática'
+    });
+
+    cur.setUTCDate(cur.getUTCDate() + 1);
+  }
+
+  return rows;
 }
 
 // Smart INMET CSV Parser (supports both hourly & daily INMET CSVs with `;` or `,`)
@@ -232,8 +413,17 @@ export default function PluviometryView({ projects, selectedProjectId, onRefresh
   const [showModal, setShowModal] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
   const [showCsvModal, setShowCsvModal] = useState(false);
+  const [importTab, setImportTab] = useState('AUTO'); // 'AUTO' | 'CSV'
+  const [autoPeriodMode, setAutoPeriodMode] = useState('MONTH'); // 'MONTH' | 'RANGE'
+  const [autoYear, setAutoYear] = useState('2026');
+  const [autoMonth, setAutoMonth] = useState('10');
+  const [autoDateFrom, setAutoDateFrom] = useState('2026-10-01');
+  const [autoDateTo, setAutoDateTo] = useState('2026-10-31');
+  const [autoProfile, setAutoProfile] = useState('REFERENCE_OCT_2026');
+  const [autoCustomMm, setAutoCustomMm] = useState('180');
+  const [autoStationPreset, setAutoStationPreset] = useState('A835');
   const [csvPreviewRows, setCsvPreviewRows] = useState([]);
-  const [csvStationName, setCsvStationName] = useState('INMET - Estação Automática');
+  const [csvStationName, setCsvStationName] = useState('INMET - A835 Maringá (PR)');
   const [csvTargetProject, setCsvTargetProject] = useState('');
   const [importingCsv, setImportingCsv] = useState(false);
   const [error, setError] = useState('');
@@ -385,57 +575,39 @@ export default function PluviometryView({ projects, selectedProjectId, onRefresh
     e.target.value = '';
   };
 
-  // Generate sample INMET October/2026 dataset matching the user's screenshot!
-  const handleLoadSampleInmetMonth = () => {
+  const handleStationPresetChange = (code) => {
+    setAutoStationPreset(code);
+    const found = INMET_STATION_PRESETS.find((s) => s.code === code);
+    if (found && found.code !== 'CUSTOM') {
+      setCsvStationName(found.name);
+    }
+  };
+
+  const handleGeneratePeriodData = () => {
     setError('');
-    const sampleOctMm = [
-      ['2026-10-01', 11.2, 0.4, 10.8, 0],
-      ['2026-10-02', 2.4, 0, 2.4, 0],
-      ['2026-10-03', 2.5, 0, 2.5, 0],
-      ['2026-10-04', 32.7, 0, 32.7, 0],
-      ['2026-10-05', 8.7, 0, 8.7, 0],
-      ['2026-10-06', 4.2, 0, 4.2, 0],
-      ['2026-10-07', 1.4, 0, 1.4, 0],
-      ['2026-10-08', 31.2, 0, 31.2, 0],
-      ['2026-10-09', 37.7, 0, 37.7, 0],
-      ['2026-10-10', 36.0, 0, 36.0, 0],
-      ['2026-10-11', 13.0, 0, 13.0, 0],
-      ['2026-10-12', 14.4, 0, 14.4, 0],
-      ['2026-10-13', 52.0, 0, 52.0, 0],
-      ['2026-10-14', 50.4, 0, 50.4, 0],
-      ['2026-10-15', 18.0, 0, 18.0, 0],
-      ['2026-10-16', 0.4, 0, 0.4, 0],
-      ['2026-10-17', 0.0, 0, 0, 0],
-      ['2026-10-18', 0.0, 0, 0, 0],
-      ['2026-10-19', 0.0, 0, 0, 0],
-      ['2026-10-20', 0.0, 0, 0, 0],
-      ['2026-10-21', 0.0, 0, 0, 0],
-      ['2026-10-22', 12.4, 0, 12.4, 0],
-      ['2026-10-23', 11.0, 0, 11.0, 0],
-      ['2026-10-24', 2.0, 0, 2.0, 0],
-      ['2026-10-25', 7.0, 0, 7.0, 0],
-      ['2026-10-26', 2.0, 0, 2.0, 0],
-      ['2026-10-27', 0.0, 0, 0, 0],
-      ['2026-10-28', 2.0, 0, 2.0, 0],
-      ['2026-10-29', 2.0, 0, 2.0, 0],
-      ['2026-10-30', 0.0, 0, 0, 1],
-      ['2026-10-31', 0.0, 0, 0, 0]
-    ];
+    try {
+      const rows = generatePeriodPluviometry({
+        periodMode: autoPeriodMode,
+        year: autoYear,
+        month: autoMonth,
+        dateFrom: autoDateFrom,
+        dateTo: autoDateTo,
+        profile: autoProfile,
+        customMm: autoCustomMm,
+        stationName: csvStationName
+      });
+      setCsvPreviewRows(rows);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
 
-    const rows = sampleOctMm.map(([dt, tot, mMm, aMm, prod]) => ({
-      record_date: dt,
-      rainfall_mm: tot,
-      morning_mm: mMm,
-      afternoon_mm: aMm,
-      night_mm: 0,
-      temperature_min: 18,
-      temperature_max: tot >= 30 ? 22 : 29,
-      production_tons: prod,
-      station_name: 'INMET - Estação Automática (12 UTC)'
-    }));
-
-    setCsvStationName('INMET - Estação Automática (12 UTC)');
-    setCsvPreviewRows(rows);
+  const openImportModal = () => {
+    setError('');
+    if (!csvTargetProject) {
+      setCsvTargetProject(selectedProjectId !== 'ALL' ? selectedProjectId : (projects[0]?.id || ''));
+    }
+    setShowCsvModal(true);
   };
 
   const handleConfirmCsvImport = async () => {
@@ -1302,14 +1474,11 @@ export default function PluviometryView({ projects, selectedProjectId, onRefresh
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => {
-              setError('');
-              setShowCsvModal(true);
-            }}
+            onClick={openImportModal}
             className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-semibold text-xs shadow-sm transition"
           >
-            <Upload className="w-4 h-4" />
-            Importar CSV (INMET)
+            <Sparkles className="w-4 h-4 text-amber-300" />
+            Importar / Gerar Dados INMET
           </button>
 
           <button
@@ -1789,22 +1958,22 @@ export default function PluviometryView({ projects, selectedProjectId, onRefresh
       </div>
 
       {/* =====================================================================
-          MODAL 1: IMPORTAR CSV DO INMET
+          MODAL 1: IMPORTAR CSV OU GERAR AUTOMATICAMENTE POR PERÍODO (INMET)
          ===================================================================== */}
       {showCsvModal && (
         <div className="fixed inset-0 z-50 bg-slate-900/65 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl max-w-3xl w-full p-6 shadow-xl border border-slate-200 my-8 max-h-[90vh] flex flex-col">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-200 shrink-0">
+          <div className="bg-white rounded-2xl max-w-3xl w-full p-6 shadow-xl border border-slate-200 my-8 max-h-[92vh] flex flex-col">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200 shrink-0">
               <div className="flex items-center gap-2.5">
                 <div className="p-2 rounded-lg bg-sky-100 text-sky-700">
-                  <Upload className="w-5 h-5" />
+                  <CloudRain className="w-5 h-5" />
                 </div>
                 <div>
                   <h3 className="text-lg font-bold text-slate-900">
-                    Importar Dados Pluviométricos via CSV (Padrão INMET)
+                    Importação e Geração de Dados Pluviométricos (INMET)
                   </h3>
                   <p className="text-xs text-slate-500">
-                    Suporta planilhas CSV horárias ou diárias exportadas das estações meteorológicas do INMET.
+                    Escolha o mês/período para preenchimento automático inteligente ou envie uma planilha CSV do INMET.
                   </p>
                 </div>
               </div>
@@ -1814,13 +1983,14 @@ export default function PluviometryView({ projects, selectedProjectId, onRefresh
             </div>
 
             {error && (
-              <div className="mt-4 p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium shrink-0">
+              <div className="mt-3 p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium shrink-0">
                 {error}
               </div>
             )}
 
             <div className="mt-4 space-y-4 overflow-y-auto flex-1 pr-1">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Configurações Globais da Importação: Obra e Estação */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
                     Obra de Destino para os Dados *
@@ -1828,7 +1998,7 @@ export default function PluviometryView({ projects, selectedProjectId, onRefresh
                   <select
                     value={csvTargetProject}
                     onChange={(e) => setCsvTargetProject(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs bg-white font-medium"
                   >
                     <option value="">Selecione a obra...</option>
                     {projects.map((p) => (
@@ -1848,43 +2018,256 @@ export default function PluviometryView({ projects, selectedProjectId, onRefresh
                     value={csvStationName}
                     onChange={(e) => setCsvStationName(e.target.value)}
                     placeholder="Ex: INMET - Estação A835 Maringá"
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs bg-white"
                   />
                 </div>
               </div>
 
-              <div className="border-2 border-dashed border-sky-400 bg-sky-50/40 rounded-xl p-5 text-center space-y-2">
-                <input
-                  id="inmet-csv-input"
-                  type="file"
-                  accept=".csv,.txt"
-                  onChange={handleCsvFileSelect}
-                  className="hidden"
-                />
-                <label
-                  htmlFor="inmet-csv-input"
-                  className="cursor-pointer flex flex-col items-center justify-center gap-1"
+              {/* Abas: Geração Automática por Mês/Período vs Upload CSV */}
+              <div className="flex border-b border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setImportTab('AUTO')}
+                  className={`px-4 py-2.5 text-xs font-bold border-b-2 flex items-center gap-1.5 transition ${
+                    importTab === 'AUTO'
+                      ? 'border-sky-600 text-sky-700 bg-sky-50/50'
+                      : 'border-transparent text-slate-500 hover:text-slate-700'
+                  }`}
                 >
-                  <Upload className="w-7 h-7 text-sky-600" />
-                  <span className="text-sm font-bold text-slate-800">
-                    Clique para selecionar o arquivo .CSV exportado do INMET
-                  </span>
-                  <span className="text-xs text-slate-500">
-                    Reconhece automaticamente colunas de Data, Hora (UTC), Precipitação Total (mm) e Temperatura.
-                  </span>
-                </label>
-
-                <div className="pt-2">
-                  <button
-                    type="button"
-                    onClick={handleLoadSampleInmetMonth}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 text-xs font-bold border border-amber-300 transition"
-                  >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    Carregar Mês Completo de Exemplo (Outubro/2026 — 31 dias / 354,6 mm igual ao seu modelo)
-                  </button>
-                </div>
+                  <Sparkles className="w-4 h-4 text-amber-500" />
+                  Escolher Mês / Período Automático
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setImportTab('CSV')}
+                  className={`px-4 py-2.5 text-xs font-bold border-b-2 flex items-center gap-1.5 transition ${
+                    importTab === 'CSV'
+                      ? 'border-sky-600 text-sky-700 bg-sky-50/50'
+                      : 'border-transparent text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  <Upload className="w-4 h-4 text-sky-600" />
+                  Importar Arquivo CSV do INMET
+                </button>
               </div>
+
+              {/* ABA 1: GERADOR AUTOMÁTICO DE PERÍODO */}
+              {importTab === 'AUTO' && (
+                <div className="space-y-3 bg-white p-4 rounded-xl border border-slate-200">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Modo de Seleção
+                      </label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setAutoPeriodMode('MONTH')}
+                          className={`px-3 py-2 text-xs font-bold rounded-lg border transition ${
+                            autoPeriodMode === 'MONTH'
+                              ? 'bg-sky-600 text-white border-sky-600 shadow-xs'
+                              : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                          }`}
+                        >
+                          Mês Completo
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setAutoPeriodMode('RANGE')}
+                          className={`px-3 py-2 text-xs font-bold rounded-lg border transition ${
+                            autoPeriodMode === 'RANGE'
+                              ? 'bg-sky-600 text-white border-sky-600 shadow-xs'
+                              : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                          }`}
+                        >
+                          Intervalo (De / Até)
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Estações do INMET no Paraná / Brasil
+                      </label>
+                      <select
+                        value={autoStationPreset}
+                        onChange={(e) => handleStationPresetChange(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs bg-white"
+                      >
+                        {INMET_STATION_PRESETS.map((st) => (
+                          <option key={st.code} value={st.code}>
+                            {st.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {autoPeriodMode === 'MONTH' ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">
+                          Escolher o Mês Desejado
+                        </label>
+                        <select
+                          value={autoMonth}
+                          onChange={(e) => setAutoMonth(e.target.value)}
+                          className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs bg-white font-medium"
+                        >
+                          {MONTH_NAMES.map((name, idx) => {
+                            const val = String(idx + 1).padStart(2, '0');
+                            return (
+                              <option key={val} value={val}>
+                                {val} — {name}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">
+                          Ano de Referência
+                        </label>
+                        <select
+                          value={autoYear}
+                          onChange={(e) => setAutoYear(e.target.value)}
+                          className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs bg-white font-medium"
+                        >
+                          {[2027, 2026, 2025, 2024, 2023, 2022, 2021, 2020].map((yr) => (
+                            <option key={yr} value={String(yr)}>
+                              Ano {yr}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">
+                          Data Inicial (De)
+                        </label>
+                        <input
+                          type="date"
+                          value={autoDateFrom}
+                          onChange={(e) => setAutoDateFrom(e.target.value)}
+                          className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">
+                          Data Final (Até)
+                        </label>
+                        <input
+                          type="date"
+                          value={autoDateTo}
+                          onChange={(e) => setAutoDateTo(e.target.value)}
+                          className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs bg-white"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Perfil Pluviométrico / Precipitação
+                      </label>
+                      <select
+                        value={autoProfile}
+                        onChange={(e) => setAutoProfile(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs bg-white"
+                      >
+                        <option value="REFERENCE_OCT_2026">
+                          Modelo de Referência (Outubro/2026 — 354,6 mm igual ao relatório)
+                        </option>
+                        <option value="SEASONAL">
+                          Média Climatológica Sazonal do Mês Escolhido
+                        </option>
+                        <option value="HEAVY">Período Muito Chuvoso (~320 mm)</option>
+                        <option value="MODERATE">Período Moderado (~160 mm)</option>
+                        <option value="DRY">Período Seco / Estiagem (~45 mm)</option>
+                        <option value="CUSTOM">Definir Volume Total em mm...</option>
+                      </select>
+                    </div>
+
+                    {autoProfile === 'CUSTOM' ? (
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">
+                          Volume Total Desejado (mm)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={autoCustomMm}
+                          onChange={(e) => setAutoCustomMm(e.target.value)}
+                          placeholder="Ex: 215.5"
+                          className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs bg-white"
+                        />
+                      </div>
+                    ) : (
+                      <div className="text-[11px] text-slate-500 pb-1">
+                        Gera turnos (manhã, tarde, noite), classes, temperaturas e dias impraticáveis.
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="pt-2">
+                    <button
+                      type="button"
+                      onClick={handleGeneratePeriodData}
+                      className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs shadow-sm transition"
+                    >
+                      <Sparkles className="w-4 h-4 text-amber-300" />
+                      Gerar e Pré-Visualizar Dados do Período Escolhido
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* ABA 2: UPLOAD DE ARQUIVO CSV DO INMET */}
+              {importTab === 'CSV' && (
+                <div className="space-y-3">
+                  <div className="border-2 border-dashed border-sky-400 bg-sky-50/40 rounded-xl p-5 text-center space-y-2">
+                    <input
+                      id="inmet-csv-input"
+                      type="file"
+                      accept=".csv,.txt"
+                      onChange={handleCsvFileSelect}
+                      className="hidden"
+                    />
+                    <label
+                      htmlFor="inmet-csv-input"
+                      className="cursor-pointer flex flex-col items-center justify-center gap-1.5"
+                    >
+                      <Upload className="w-7 h-7 text-sky-600" />
+                      <span className="text-sm font-bold text-slate-800">
+                        Clique para selecionar o arquivo .CSV exportado do portal do INMET
+                      </span>
+                      <span className="text-xs text-slate-500 max-w-md">
+                        Compatível com medições horárias ou diárias (12 UTC) exportadas do BDMEP ou Tabela de Estações.
+                      </span>
+                    </label>
+                  </div>
+
+                  <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-xs text-amber-900 flex items-start gap-2">
+                    <span className="font-bold">Dica:</span>
+                    <span>
+                      Você pode baixar o arquivo CSV de qualquer estação e período oficial em{' '}
+                      <a
+                        href="https://tempo.inmet.gov.br/TabelaEstacoes/"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-bold underline text-sky-700"
+                      >
+                        tempo.inmet.gov.br
+                      </a>{' '}
+                      e importá-lo diretamente aqui.
+                    </span>
+                  </div>
+                </div>
+              )}
 
               {csvPreviewRows.length > 0 && (
                 <div className="space-y-2">
