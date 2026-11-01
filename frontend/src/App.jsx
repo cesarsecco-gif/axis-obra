@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, Suspense, lazy } from 'react';
 import {
   LayoutDashboard,
   Camera,
@@ -11,28 +11,34 @@ import {
   Settings,
   LogOut,
   UserCheck,
-  Shield,
-  ChevronRight,
   Menu,
   X,
-  Lock,
+  KeyRound,
+  Eye,
   CheckCircle2
 } from 'lucide-react';
 import {
   apiRequest,
   getStoredUser,
+  getStoredToken,
+  getStoredImpersonator,
   setAuthSession,
-  clearAuthSession
+  clearAuthSession,
+  UNAUTHORIZED_EVENT
 } from './api';
+import LoginView from './components/LoginView';
+import ChangePasswordModal from './components/ChangePasswordModal';
 import DashboardView from './components/DashboardView';
-import PhotosView from './components/PhotosView';
-import RdoView from './components/RdoView';
-import OccurrencesView from './components/OccurrencesView';
-import EmployeesView from './components/EmployeesView';
-import EquipmentsView from './components/EquipmentsView';
-import ProjectsUsersView from './components/ProjectsUsersView';
-import PluviometryView from './components/PluviometryView';
-import SettingsView from './components/SettingsView';
+
+// Módulos carregados sob demanda (reduz o tamanho do carregamento inicial)
+const PhotosView = lazy(() => import('./components/PhotosView'));
+const RdoView = lazy(() => import('./components/RdoView'));
+const OccurrencesView = lazy(() => import('./components/OccurrencesView'));
+const EmployeesView = lazy(() => import('./components/EmployeesView'));
+const EquipmentsView = lazy(() => import('./components/EquipmentsView'));
+const ProjectsUsersView = lazy(() => import('./components/ProjectsUsersView'));
+const PluviometryView = lazy(() => import('./components/PluviometryView'));
+const SettingsView = lazy(() => import('./components/SettingsView'));
 
 const NAV_ITEMS = [
   { id: 'DASHBOARD', label: 'Painel Consolidado', icon: LayoutDashboard, badge: null },
@@ -47,28 +53,14 @@ const NAV_ITEMS = [
 ];
 
 export default function App() {
-  const [currentUser, setCurrentUser] = useState(() => getStoredUser());
-  const [demoUsers, setDemoUsers] = useState([]);
+  const [currentUser, setCurrentUser] = useState(() => (getStoredToken() ? getStoredUser() : null));
+  const [impersonator, setImpersonator] = useState(() => getStoredImpersonator());
   const [activeNav, setActiveNav] = useState('DASHBOARD');
   const [projects, setProjects] = useState([]);
   const [selectedProjectId, setSelectedProjectId] = useState('ALL');
   const [dashboardData, setDashboardData] = useState(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-
-  // Login form state
-  const [loginEmail, setLoginEmail] = useState('admin@axisobra.com.br');
-  const [loginPassword, setLoginPassword] = useState('123456');
-  const [loginError, setLoginError] = useState('');
-  const [loggingIn, setLoggingIn] = useState(false);
-
-  const loadDemoUsers = useCallback(async () => {
-    try {
-      const list = await apiRequest('/api/auth/demo-users');
-      setDemoUsers(list);
-    } catch (err) {
-      console.error(err);
-    }
-  }, []);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
 
   const loadWorkspaceData = useCallback(
     async (projectIdOverride) => {
@@ -96,9 +88,32 @@ export default function App() {
     [currentUser, selectedProjectId]
   );
 
+  const resetSessionState = useCallback(() => {
+    setCurrentUser(null);
+    setImpersonator(null);
+    setDashboardData(null);
+    setProjects([]);
+    setSelectedProjectId('ALL');
+    setActiveNav('DASHBOARD');
+  }, []);
+
+  // Sessão expirada em qualquer requisição -> volta para o login
   useEffect(() => {
-    loadDemoUsers();
-  }, [loadDemoUsers]);
+    const onUnauthorized = () => resetSessionState();
+    window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+  }, [resetSessionState]);
+
+  // Valida a sessão salva ao abrir o sistema e atualiza os dados do usuário
+  useEffect(() => {
+    if (!getStoredToken()) return;
+    apiRequest('/api/auth/me')
+      .then((res) => {
+        setAuthSession(null, res.user, getStoredImpersonator());
+        setCurrentUser(res.user);
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (currentUser) {
@@ -106,35 +121,31 @@ export default function App() {
     }
   }, [currentUser, selectedProjectId, loadWorkspaceData]);
 
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    setLoginError('');
-    setLoggingIn(true);
-    try {
-      const res = await apiRequest('/api/auth/login', {
-        method: 'POST',
-        body: JSON.stringify({ email: loginEmail, password: loginPassword })
-      });
-      setAuthSession(res.token, res.user);
-      setCurrentUser(res.user);
-      setSelectedProjectId('ALL');
-    } catch (err) {
-      setLoginError(err.message);
-    } finally {
-      setLoggingIn(false);
-    }
+  const applySession = (res, impersonatorInfo = null) => {
+    setAuthSession(res.token, res.user, impersonatorInfo);
+    setImpersonator(impersonatorInfo);
+    setSelectedProjectId('ALL');
+    setActiveNav('DASHBOARD');
+    setCurrentUser(res.user);
   };
 
-  const handleQuickSwitchUser = async (userId) => {
+  // Administrador simula o acesso de outro usuário (somente leitura do ponto de vista de permissões)
+  const handleImpersonate = async (userId) => {
     try {
-      const res = await apiRequest('/api/auth/login', {
+      const res = await apiRequest('/api/auth/impersonate', {
         method: 'POST',
         body: JSON.stringify({ userId: Number(userId) })
       });
-      setAuthSession(res.token, res.user);
-      setSelectedProjectId('ALL');
-      setCurrentUser(res.user);
-      await loadDemoUsers();
+      applySession(res, { id: currentUser.id, name: currentUser.name });
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const handleStopImpersonation = async () => {
+    try {
+      const res = await apiRequest('/api/auth/stop-impersonation', { method: 'POST' });
+      applySession(res, null);
     } catch (err) {
       alert(err.message);
     }
@@ -142,162 +153,16 @@ export default function App() {
 
   const handleLogout = () => {
     clearAuthSession();
-    setCurrentUser(null);
-    setDashboardData(null);
-    setProjects([]);
+    resetSessionState();
   };
 
-  // ==========================================================================
-  // LOGIN SCREEN (WITH 1-CLICK PROFILE DEMO & RBAC PREVIEW)
-  // ==========================================================================
   if (!currentUser) {
-    return (
-      <div className="min-h-screen bg-slate-950 text-white flex flex-col lg:flex-row">
-        {/* Left Branding & Features Column */}
-        <div className="lg:w-7/12 p-8 lg:p-14 flex flex-col justify-between bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 border-b lg:border-b-0 lg:border-r border-slate-800">
-          <div>
-            <div className="inline-flex items-center gap-3">
-              <div className="w-11 h-11 rounded-xl bg-amber-500 flex items-center justify-center text-slate-950 font-black text-xl shadow-lg shadow-amber-500/20">
-                AX
-              </div>
-              <div>
-                <h1 className="text-2xl font-black tracking-tight text-white">AXIS OBRA</h1>
-                <p className="text-xs font-medium text-amber-400 uppercase tracking-widest">
-                  Sistema Integrado de Engenharia e Gestão de Obras
-                </p>
-              </div>
-            </div>
-
-            <h2 className="text-3xl lg:text-4xl font-extrabold mt-10 leading-tight text-white">
-              Controle completo do canteiro de obras em uma única plataforma.
-            </h2>
-            <p className="text-slate-400 mt-3 text-sm lg:text-base max-w-2xl">
-              Gerencie múltiplas obras com permissões individualizadas por usuário, diário fotográfico técnico, livro de ocorrências, controle de efetivo, maquinário e boletim pluviométrico.
-            </p>
-
-            {/* 6 Modules Checklist */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 mt-8">
-              {[
-                { num: '01', title: 'Registro Fotográfico', desc: 'Galeria por etapa construtiva com carimbo técnico' },
-                { num: '02', title: 'Registro de Ocorrências', desc: 'Não conformidades, severidade e plano de ação' },
-                { num: '03', title: 'Cadastro de Funcionários', desc: 'Efetivo CLT e terceiros, funções, ASO e NRs' },
-                { num: '04', title: 'Cadastro de Equipamentos', desc: 'Patrimônio, locação, custos e manutenção preventiva' },
-                { num: '05', title: 'Obras por Usuário (RBAC)', desc: 'Vínculo seletivo de obras por Engenheiro/Encarregado' },
-                { num: '06', title: 'Registro de Pluviometria', desc: 'Medição em mm, turnos Manhã/Tarde/Noite e paralisações' }
-              ].map((m) => (
-                <div
-                  key={m.num}
-                  className="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 flex items-start gap-3"
-                >
-                  <span className="px-2 py-1 rounded bg-amber-500/15 text-amber-400 font-mono text-xs font-bold border border-amber-500/30">
-                    {m.num}
-                  </span>
-                  <div>
-                    <h3 className="text-sm font-bold text-white">{m.title}</h3>
-                    <p className="text-xs text-slate-400 mt-0.5">{m.desc}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="mt-10 pt-6 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
-            <span>AXIS OBRA v1.0 • Arquitetura Full-Stack (Node.js/Express + SQLite + React)</span>
-            <span>Conformidade ABNT NBR / NR-18 / RDO Digital</span>
-          </div>
-        </div>
-
-        {/* Right Login & Quick Role Selector Column */}
-        <div className="lg:w-5/12 p-8 lg:p-12 flex flex-col justify-center bg-slate-950">
-          <div className="max-w-md w-full mx-auto space-y-6">
-            <div>
-              <h2 className="text-2xl font-bold text-white">Acessar o Sistema</h2>
-              <p className="text-xs text-slate-400 mt-1">
-                Entre com suas credenciais ou escolha um perfil abaixo para testar o controle de acesso por obra:
-              </p>
-            </div>
-
-            {loginError && (
-              <div className="p-3 rounded-lg bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs font-medium">
-                {loginError}
-              </div>
-            )}
-
-            <form onSubmit={handleLogin} className="space-y-4 bg-slate-900 p-5 rounded-2xl border border-slate-800">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">E-mail Corporativo</label>
-                <input
-                  type="email"
-                  required
-                  value={loginEmail}
-                  onChange={(e) => setLoginEmail(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-sm focus:border-amber-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Senha (padrão: 123456)</label>
-                <input
-                  type="password"
-                  required
-                  value={loginPassword}
-                  onChange={(e) => setLoginPassword(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-sm focus:border-amber-500 outline-none"
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={loggingIn}
-                className="w-full py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-sm shadow-lg shadow-amber-500/10 transition"
-              >
-                {loggingIn ? 'Autenticando...' : 'Entrar no AXIS OBRA'}
-              </button>
-            </form>
-
-            {/* Quick 1-Click Profile Access */}
-            <div className="space-y-2.5">
-              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-amber-400">
-                <Shield className="w-4 h-4" />
-                Acesso Rápido por Perfil (Demonstração de Vínculo de Obras)
-              </div>
-              <div className="space-y-2">
-                {demoUsers.map((u) => (
-                  <button
-                    key={u.id}
-                    type="button"
-                    onClick={() => handleQuickSwitchUser(u.id)}
-                    className="w-full text-left p-3 rounded-xl bg-slate-900 hover:bg-slate-800/90 border border-slate-800 hover:border-amber-500/60 transition flex items-center justify-between group"
-                  >
-                    <div className="pr-2">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-sm text-white group-hover:text-amber-400 transition">
-                          {u.name}
-                        </span>
-                        <span
-                          className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                            u.role === 'ADMIN'
-                              ? 'bg-amber-500 text-slate-950'
-                              : 'bg-slate-800 text-slate-300 border border-slate-700'
-                          }`}
-                        >
-                          {u.role}
-                        </span>
-                      </div>
-                      <div className="text-[11px] text-slate-400 mt-1">
-                        {u.role === 'ADMIN'
-                          ? 'Acesso a todas as 3 obras cadastradas'
-                          : `Obras vinculadas: ${(u.projects || []).map((p) => p.code).join(', ') || 'Nenhuma'}`}
-                      </div>
-                    </div>
-                    <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-amber-400 shrink-0" />
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
+    return <LoginView onLoggedIn={(res) => applySession(res, null)} />;
   }
+
+  const moduleFallback = (
+    <div className="p-10 text-center text-sm text-slate-500 font-semibold">Carregando módulo...</div>
+  );
 
   // ==========================================================================
   // MAIN AUTHENTICATED WORKSPACE
@@ -368,7 +233,16 @@ export default function App() {
           })}
         </nav>
 
-        <div className="p-4 border-t border-slate-800">
+        <div className="p-4 border-t border-slate-800 space-y-2">
+          {!impersonator && (
+            <button
+              onClick={() => setShowPasswordModal(true)}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white text-xs font-semibold transition border border-slate-800"
+            >
+              <KeyRound className="w-4 h-4" />
+              Alterar Senha
+            </button>
+          )}
           <button
             onClick={handleLogout}
             className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-slate-900 hover:bg-rose-600 text-slate-300 hover:text-white text-xs font-semibold transition border border-slate-800"
@@ -409,21 +283,14 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Mobile User Switcher */}
-              <div className="flex items-center gap-1.5 bg-slate-100 px-2 py-1 rounded-lg border border-slate-200 max-w-[170px] sm:max-w-xs">
-                <UserCheck className="w-3.5 h-3.5 text-slate-600 shrink-0" />
-                <select
-                  value={currentUser.id}
-                  onChange={(e) => handleQuickSwitchUser(e.target.value)}
-                  className="text-[11px] font-bold text-slate-900 bg-transparent outline-none truncate w-full"
-                >
-                  {demoUsers.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name} [{u.role}]
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <button
+                onClick={() => setShowPasswordModal(true)}
+                className="p-2 rounded-lg bg-slate-100 border border-slate-200 text-slate-600"
+                aria-label="Alterar senha"
+                title="Alterar senha"
+              >
+                <KeyRound className="w-4 h-4" />
+              </button>
             </div>
 
             {/* Project Filter Selector (Full width on mobile, auto on desktop) */}
@@ -450,26 +317,29 @@ export default function App() {
               </div>
             </div>
 
-            {/* Desktop Quick User Switcher */}
             <div className="hidden lg:flex items-center gap-2 shrink-0">
               <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200">
                 <UserCheck className="w-4 h-4 text-slate-600 shrink-0" />
-                <span className="text-xs font-semibold text-slate-600">Alternar Usuário:</span>
-                <select
-                  value={currentUser.id}
-                  onChange={(e) => handleQuickSwitchUser(e.target.value)}
-                  className="text-xs font-bold text-slate-900 bg-white border border-slate-300 rounded px-2 py-1 outline-none"
-                >
-                  {demoUsers.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name} [{u.role}]
-                    </option>
-                  ))}
-                </select>
+                <span className="text-xs font-bold text-slate-900">{currentUser.name}</span>
               </div>
             </div>
           </div>
         </header>
+
+        {impersonator && (
+          <div className="bg-amber-100 border-b border-amber-300 px-3 sm:px-6 lg:px-8 py-2 flex flex-wrap items-center justify-between gap-2 text-xs text-amber-900">
+            <span className="flex items-center gap-2 font-semibold">
+              <Eye className="w-4 h-4" />
+              Simulando o acesso de {currentUser.name} ({currentUser.role}). Você vê exatamente o que este usuário vê.
+            </span>
+            <button
+              onClick={handleStopImpersonation}
+              className="px-3 py-1 rounded-lg bg-slate-900 text-white font-bold hover:bg-slate-800"
+            >
+              Voltar para {impersonator.name}
+            </button>
+          </div>
+        )}
 
         {/* Slide-Over Mobile & Tablet Drawer */}
         {mobileMenuOpen && (
@@ -557,7 +427,19 @@ export default function App() {
                 </nav>
               </div>
 
-              <div className="p-4 border-t border-slate-800">
+              <div className="p-4 border-t border-slate-800 space-y-2">
+                {!impersonator && (
+                  <button
+                    onClick={() => {
+                      setMobileMenuOpen(false);
+                      setShowPasswordModal(true);
+                    }}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white text-xs font-bold transition border border-slate-800"
+                  >
+                    <KeyRound className="w-4 h-4" />
+                    Alterar Senha
+                  </button>
+                )}
                 <button
                   onClick={handleLogout}
                   className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-rose-600 text-slate-300 hover:text-white text-xs font-bold transition border border-slate-800"
@@ -572,6 +454,7 @@ export default function App() {
 
         {/* Page Body */}
         <main className="flex-1 p-3 sm:p-5 lg:p-8 pb-24 lg:pb-8 max-w-7xl w-full mx-auto min-w-0">
+          <Suspense fallback={moduleFallback}>
           {activeNav === 'DASHBOARD' && (
             <DashboardView
               dashboard={dashboardData}
@@ -625,11 +508,8 @@ export default function App() {
           {activeNav === 'PROJECTS' && (
             <ProjectsUsersView
               currentUser={currentUser}
-              onProjectsUpdated={() => {
-                loadWorkspaceData();
-                loadDemoUsers();
-              }}
-              onSwitchUser={(uid) => handleQuickSwitchUser(uid)}
+              onProjectsUpdated={() => loadWorkspaceData()}
+              onSwitchUser={impersonator ? null : (uid) => handleImpersonate(uid)}
             />
           )}
 
@@ -648,7 +528,10 @@ export default function App() {
               currentUser={currentUser}
             />
           )}
+          </Suspense>
         </main>
+
+        {showPasswordModal && <ChangePasswordModal onClose={() => setShowPasswordModal(false)} />}
 
         {/* Mobile & Tablet Fixed Bottom Quick-Access Bar */}
         <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-950/95 backdrop-blur-md border-t border-slate-800 px-2 py-1.5 flex items-center justify-around shadow-2xl">

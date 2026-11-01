@@ -6,9 +6,18 @@ services:
     restart: unless-stopped
     ports:
       - "3001:3001"
+    # Demais variáveis (TOKEN_SECRET, SMTP_*, ADMIN_*) — veja .env.example.
+    # No Coolify, cadastre-as em "Environment Variables".
     environment:
       - NODE_ENV=production
       - PORT=3001
+      - TOKEN_SECRET=${TOKEN_SECRET:-}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-465}
+      - SMTP_SECURE=${SMTP_SECURE:-true}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - SMTP_FROM=${SMTP_FROM:-}
     volumes:
       - axis_obra_data:/app/backend/data
       - axis_obra_uploads:/app/backend/uploads

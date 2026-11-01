@@ -24,14 +24,20 @@ jobs:
           npm --prefix frontend install
           npm --prefix frontend run build
 
+      - name: Testes da API
+        run: npm --prefix backend test
+
   deploy-vps:
     name: Atualizar VPS via SSH
     needs: build-check
     runs-on: ubuntu-latest
-    # Só executa o deploy SSH se o segredo VPS_HOST estiver configurado no repositório
-    if: ${{ secrets.VPS_HOST != '' }}
+    env:
+      HAS_VPS_HOST: ${{ secrets.VPS_HOST != '' }}
     steps:
+      # Só executa o deploy SSH se o segredo VPS_HOST estiver configurado no repositório
+      # (o contexto "secrets" não pode ser usado direto no "if" de um job)
       - name: Executar deploy remoto na VPS
+        if: env.HAS_VPS_HOST == 'true'
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VPS_HOST }}
