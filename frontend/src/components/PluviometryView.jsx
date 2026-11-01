@@ -677,20 +677,84 @@ export default function PluviometryView({ projects, selectedProjectId, onRefresh
 
   const analytics = useMemo(() => {
     const totalDays = chronologicalRecords.length;
-    let cumulative = 0;
+    // Monthly view when "Todos os Meses" is selected and no custom date range is set
+    const isMonthlyChart = monthFilter === 'ALL' && !dateFrom && !dateTo;
 
-    const chartPoints = chronologicalRecords.map((r) => {
-      const daily = Number(r.rainfall_mm) || 0;
-      cumulative = Number((cumulative + daily).toFixed(1));
-      return {
-        ...r,
-        dailyMm: daily,
-        cumulativeMm: cumulative,
-        shortDate: formatDateBR(r.record_date).slice(0, 5)
-      };
-    });
+    let chartPoints = [];
+    let totalMm = 0;
 
-    const totalMm = cumulative;
+    if (isMonthlyChart) {
+      // Group records by Year-Month: YYYY-MM
+      const monthMap = new Map();
+
+      // If a specific year is chosen (e.g. 2026), list all 12 calendar months
+      if (yearFilter !== 'ALL') {
+        const yNum = parseInt(yearFilter, 10);
+        for (let m = 1; m <= 12; m++) {
+          const mKey = `${yNum}-${String(m).padStart(2, '0')}`;
+          const mNameShort = MONTH_NAMES[m - 1].slice(0, 3);
+          monthMap.set(mKey, {
+            key: mKey,
+            periodMm: 0,
+            label: mNameShort,
+            fullLabel: `${MONTH_NAMES[m - 1]}/${yNum}`
+          });
+        }
+      }
+
+      chronologicalRecords.forEach((r) => {
+        const dStr = String(r.record_date || '').slice(0, 10);
+        const mKey = dStr.slice(0, 7);
+        if (!mKey || mKey.length < 7) return;
+
+        if (!monthMap.has(mKey)) {
+          const [y, m] = mKey.split('-').map(Number);
+          const mNameShort = MONTH_NAMES[m - 1] ? MONTH_NAMES[m - 1].slice(0, 3) : mKey;
+          const label = yearFilter === 'ALL' ? `${mNameShort}/${String(y).slice(-2)}` : mNameShort;
+          monthMap.set(mKey, {
+            key: mKey,
+            periodMm: 0,
+            label,
+            fullLabel: `${MONTH_NAMES[m - 1] || mKey} ${y}`
+          });
+        }
+
+        const mObj = monthMap.get(mKey);
+        const mm = Number(r.rainfall_mm) || 0;
+        mObj.periodMm = Number((mObj.periodMm + mm).toFixed(1));
+      });
+
+      const sortedMonths = Array.from(monthMap.values()).sort((a, b) => a.key.localeCompare(b.key));
+      let cum = 0;
+      chartPoints = sortedMonths.map((m) => {
+        cum = Number((cum + m.periodMm).toFixed(1));
+        return {
+          id: m.key,
+          periodMm: m.periodMm,
+          cumulativeMm: cum,
+          xLabel: m.label,
+          fullLabel: m.fullLabel
+        };
+      });
+
+      totalMm = cum;
+    } else {
+      let cum = 0;
+      chartPoints = chronologicalRecords.map((r) => {
+        const daily = Number(r.rainfall_mm) || 0;
+        cum = Number((cum + daily).toFixed(1));
+        return {
+          ...r,
+          id: r.id || r.record_date,
+          periodMm: daily,
+          cumulativeMm: cum,
+          xLabel: formatDateBR(r.record_date).slice(0, 5),
+          fullLabel: formatDateBR(r.record_date)
+        };
+      });
+
+      totalMm = cum;
+    }
 
     // 1. DISTRIBUIÇÃO DOS DIAS POR CLASSE DE CHUVA
     const classes = [
@@ -822,6 +886,7 @@ export default function PluviometryView({ projects, selectedProjectId, onRefresh
     return {
       totalDays,
       totalMm,
+      isMonthlyChart,
       totalRainyDays,
       totalImpracticableDays,
       totalProduction,
@@ -833,31 +898,36 @@ export default function PluviometryView({ projects, selectedProjectId, onRefresh
       maxWeekMm,
       shifts
     };
-  }, [chronologicalRecords]);
+  }, [chronologicalRecords, monthFilter, dateFrom, dateTo, yearFilter]);
 
   // ============================================================================
-  // SVG DUAL-AXIS CHART GENERATOR ("Precipitação diária e acumulada (mm)")
+  // SVG DUAL-AXIS CHART GENERATOR (Monthly or Daily view with Cumulative Line)
   // ============================================================================
   const renderDualAxisSvgChart = (width = 960, height = 310) => {
     const pts = analytics.chartPoints;
     if (pts.length === 0) return null;
+    const isMonthly = analytics.isMonthlyChart;
 
-    const padLeft = 52;
-    const padRight = 56;
+    const padLeft = 56;
+    const padRight = 58;
     const padTop = 48;
     const padBottom = 42;
     const plotW = width - padLeft - padRight;
     const plotH = height - padTop - padBottom;
 
-    const maxDailyRaw = Math.max(10, ...pts.map((p) => p.dailyMm));
-    const maxDailyAxis = Math.ceil(maxDailyRaw / 10) * 10 + 10; // e.g. 60.0
+    const maxPeriodRaw = Math.max(10, ...pts.map((p) => p.periodMm));
+    const stepAxis = maxPeriodRaw > 200 ? 50 : maxPeriodRaw > 100 ? 25 : 10;
+    const maxPeriodAxis = Math.ceil(maxPeriodRaw / stepAxis) * stepAxis + stepAxis;
 
     const maxCumRaw = Math.max(50, analytics.totalMm);
-    const maxCumAxis = Math.ceil(maxCumRaw / 50) * 50; // e.g. 400.0
+    const cumStepAxis = maxCumRaw > 500 ? 100 : 50;
+    const maxCumAxis = Math.ceil(maxCumRaw / cumStepAxis) * cumStepAxis;
 
     const n = pts.length;
     const stepX = plotW / Math.max(1, n);
-    const barWidth = Math.max(8, Math.min(26, stepX * 0.62));
+    const barWidth = isMonthly
+      ? Math.max(22, Math.min(56, stepX * 0.52))
+      : Math.max(8, Math.min(26, stepX * 0.62));
 
     const polylinePoints = pts
       .map((p, idx) => {
@@ -868,7 +938,7 @@ export default function PluviometryView({ projects, selectedProjectId, onRefresh
       .join(' ');
 
     const leftTicks = [0, 0.2, 0.4, 0.6, 0.8, 1].map((t) => ({
-      val: (maxDailyAxis * t).toFixed(1).replace('.', ','),
+      val: (maxPeriodAxis * t).toFixed(1).replace('.', ','),
       y: padTop + plotH - t * plotH
     }));
 
@@ -894,22 +964,24 @@ export default function PluviometryView({ projects, selectedProjectId, onRefresh
           fontWeight="bold"
           fill="#334155"
         >
-          Precipitação diária e acumulada (mm)
+          {isMonthly
+            ? 'Precipitação mensal e acumulada (mm)'
+            : 'Precipitação diária e acumulada (mm)'}
         </text>
 
         {/* Legend */}
-        <g transform={`translate(${width / 2 - 125}, 29)`}>
+        <g transform={`translate(${width / 2 - 130}, 29)`}>
           <rect x="0" y="2" width="22" height="8" fill="#2563eb" rx="1" />
           <text x="27" y="10" fontSize="11" fill="#475569">
-            Chuva diária (mm)
+            {isMonthly ? 'Chuva mensal (mm)' : 'Chuva diária (mm)'}
           </text>
-          <line x1="135" y1="6" x2="160" y2="6" stroke="#dc2626" strokeWidth="2.5" />
-          <text x="165" y="10" fontSize="11" fill="#475569">
+          <line x1="145" y1="6" x2="170" y2="6" stroke="#dc2626" strokeWidth="2.5" />
+          <text x="175" y="10" fontSize="11" fill="#475569">
             Acumulado (mm)
           </text>
         </g>
 
-        {/* Horizontal Gridlines & Left Y Axis (mm/dia) */}
+        {/* Horizontal Gridlines & Left Y Axis */}
         {leftTicks.map((tk, i) => (
           <g key={i}>
             <line
@@ -932,7 +1004,7 @@ export default function PluviometryView({ projects, selectedProjectId, onRefresh
           </g>
         ))}
 
-        {/* Right Y Axis Labels (mm acumulado) */}
+        {/* Right Y Axis Labels */}
         {rightTicks.map((tk, i) => (
           <text
             key={i}
@@ -955,7 +1027,7 @@ export default function PluviometryView({ projects, selectedProjectId, onRefresh
           fontSize="11"
           fill="#475569"
         >
-          mm/dia
+          {isMonthly ? 'mm/mês' : 'mm/dia'}
         </text>
         <text
           x={width - 10}
@@ -968,16 +1040,16 @@ export default function PluviometryView({ projects, selectedProjectId, onRefresh
           mm acumulado
         </text>
 
-        {/* Daily Bars (Blue) */}
+        {/* Bars (Blue) */}
         {pts.map((p, idx) => {
           const cx = padLeft + idx * stepX + stepX / 2;
-          const barH = (p.dailyMm / maxDailyAxis) * plotH;
+          const barH = (p.periodMm / maxPeriodAxis) * plotH;
           const by = padTop + plotH - barH;
-          const showXLabel = n <= 16 || idx % 2 === 0 || idx === n - 1;
+          const showXLabel = isMonthly || n <= 16 || idx % 2 === 0 || idx === n - 1;
 
           return (
             <g key={p.id || idx}>
-              {p.dailyMm > 0 && (
+              {p.periodMm > 0 && (
                 <>
                   <rect
                     x={cx - barWidth / 2}
@@ -985,17 +1057,17 @@ export default function PluviometryView({ projects, selectedProjectId, onRefresh
                     width={barWidth}
                     height={Math.max(2, barH)}
                     fill="#2563eb"
-                    rx="1"
+                    rx={isMonthly ? 2 : 1}
                   />
                   <text
                     x={cx}
                     y={Math.max(padTop + 8, by - 5)}
                     textAnchor="middle"
-                    fontSize="9.5"
+                    fontSize={isMonthly ? '10.5' : '9.5'}
                     fontWeight="600"
                     fill="#1e293b"
                   >
-                    {formatNumBR(p.dailyMm)}
+                    {formatNumBR(p.periodMm)}
                   </text>
                 </>
               )}
@@ -1004,10 +1076,11 @@ export default function PluviometryView({ projects, selectedProjectId, onRefresh
                   x={cx}
                   y={padTop + plotH + 16}
                   textAnchor="middle"
-                  fontSize="9.5"
-                  fill="#475569"
+                  fontSize={isMonthly ? '10.5' : '9.5'}
+                  fontWeight={isMonthly ? '600' : 'normal'}
+                  fill={isMonthly ? '#1e293b' : '#475569'}
                 >
-                  {p.shortDate}
+                  {p.xLabel}
                 </text>
               )}
             </g>
