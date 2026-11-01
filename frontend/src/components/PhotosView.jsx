@@ -20,7 +20,10 @@ import {
   ChevronRight,
   Layers,
   CopyCheck,
-  Images
+  Images,
+  ArrowUpDown,
+  ArrowDown,
+  ArrowUp
 } from 'lucide-react';
 import { apiRequest, formatDateBR } from '../api';
 
@@ -75,6 +78,7 @@ export default function PhotosView({ projects, selectedProjectId, onRefreshDashb
   const [yearFilter, setYearFilter] = useState('ALL');
   const [monthFilter, setMonthFilter] = useState('ALL');
   const [groupBy, setGroupBy] = useState('MONTH_YEAR'); // 'MONTH_YEAR' | 'YEAR' | 'DATE' | 'STAGE' | 'NONE'
+  const [sortOrder, setSortOrder] = useState('DESC'); // 'DESC' (Mais recentes) | 'ASC' (Mais antigas / Cronológica)
   const [searchQuery, setSearchQuery] = useState('');
   const [collapsedGroups, setCollapsedGroups] = useState({});
 
@@ -467,9 +471,9 @@ export default function PhotosView({ projects, selectedProjectId, onRefreshDashb
     return Array.from(yearsSet).sort((a, b) => b.localeCompare(a));
   }, [photos]);
 
-  // Filter photos by search, year, and month
+  // Filter and sort photos by search, year, month, and sortOrder
   const filteredPhotos = useMemo(() => {
-    return photos.filter((p) => {
+    const filtered = photos.filter((p) => {
       const dateStr = String(p.taken_at || '').slice(0, 10);
       const [year, month] = dateStr.split('-');
 
@@ -485,7 +489,20 @@ export default function PhotosView({ projects, selectedProjectId, onRefreshDashb
         p.project_name?.toLowerCase().includes(q)
       );
     });
-  }, [photos, yearFilter, monthFilter, searchQuery]);
+
+    return [...filtered].sort((a, b) => {
+      const dateA = String(a.taken_at || '');
+      const dateB = String(b.taken_at || '');
+      if (dateA !== dateB) {
+        return sortOrder === 'ASC'
+          ? dateA.localeCompare(dateB)
+          : dateB.localeCompare(dateA);
+      }
+      return sortOrder === 'ASC'
+        ? Number(a.id) - Number(b.id)
+        : Number(b.id) - Number(a.id);
+    });
+  }, [photos, yearFilter, monthFilter, searchQuery, sortOrder]);
 
   // Group filtered photos according to groupBy mode
   const groupedPhotos = useMemo(() => {
@@ -761,7 +778,7 @@ export default function PhotosView({ projects, selectedProjectId, onRefreshDashb
           </div>
         </div>
 
-        {/* Grouping Selector Row */}
+        {/* Grouping & Sorting Selector Row */}
         <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2">
             <span className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-600">
@@ -790,9 +807,41 @@ export default function PhotosView({ projects, selectedProjectId, onRefreshDashb
             ))}
           </div>
 
-          <div className="text-xs text-slate-500 font-medium">
-            Exibindo <strong>{filteredPhotos.length}</strong> registro(s) em{' '}
-            <strong>{groupedPhotos.length}</strong> período(s)/grupo(s)
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Sort Order Toggle */}
+            <div className="inline-flex items-center rounded-lg bg-slate-100 p-0.5 border border-slate-200">
+              <button
+                type="button"
+                onClick={() => setSortOrder('DESC')}
+                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold transition ${
+                  sortOrder === 'DESC'
+                    ? 'bg-white text-slate-900 shadow-2xs'
+                    : 'text-slate-500 hover:text-slate-900'
+                }`}
+                title="Exibir fotos mais recentes primeiro (Ordem Decrescente)"
+              >
+                <ArrowDown className="w-3.5 h-3.5 text-amber-600" />
+                Mais Recentes
+              </button>
+              <button
+                type="button"
+                onClick={() => setSortOrder('ASC')}
+                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold transition ${
+                  sortOrder === 'ASC'
+                    ? 'bg-white text-slate-900 shadow-2xs'
+                    : 'text-slate-500 hover:text-slate-900'
+                }`}
+                title="Exibir fotos mais antigas primeiro (Ordem Cronológica / Crescente)"
+              >
+                <ArrowUp className="w-3.5 h-3.5 text-amber-600" />
+                Mais Antigas (Cronológica)
+              </button>
+            </div>
+
+            <div className="text-xs text-slate-500 font-medium">
+              Exibindo <strong>{filteredPhotos.length}</strong> registro(s) em{' '}
+              <strong>{groupedPhotos.length}</strong> período(s)/grupo(s)
+            </div>
           </div>
         </div>
       </div>
