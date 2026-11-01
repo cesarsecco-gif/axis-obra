@@ -1537,7 +1537,7 @@ app.delete('/api/occurrences/:id', authenticate, (req, res) => {
 // ============================================================================
 
 app.get('/api/rdo', authenticate, (req, res) => {
-  const { projectId, month, year, date } = req.query;
+  const { projectId, month, year, date, fromDate, toDate, order = 'ASC' } = req.query;
   const accessible = req.accessibleProjectIds;
   if (accessible.length === 0) return res.json([]);
 
@@ -1564,6 +1564,14 @@ app.get('/api/rdo', authenticate, (req, res) => {
     query += ' AND r.rdo_date = ?';
     params.push(date);
   } else {
+    if (fromDate) {
+      query += ' AND r.rdo_date >= ?';
+      params.push(fromDate);
+    }
+    if (toDate) {
+      query += ' AND r.rdo_date <= ?';
+      params.push(toDate);
+    }
     if (year && year !== 'ALL') {
       query += " AND strftime('%Y', r.rdo_date) = ?";
       params.push(String(year));
@@ -1574,7 +1582,8 @@ app.get('/api/rdo', authenticate, (req, res) => {
     }
   }
 
-  query += ' ORDER BY r.rdo_date DESC, r.folio_number DESC';
+  const sortDirection = String(order).toUpperCase() === 'DESC' ? 'DESC' : 'ASC';
+  query += ` ORDER BY r.rdo_date ${sortDirection}, r.folio_number ${sortDirection}`;
   const rows = db.prepare(query).all(...params);
   res.json(rows);
 });
@@ -1608,16 +1617,15 @@ app.get('/api/rdo/by-date', authenticate, (req, res) => {
     .get(pid, date);
 
   const settings = db.prepare('SELECT * FROM report_settings WHERE id = 1').get() || {};
+  const project = db.prepare('SELECT id, code, name FROM projects WHERE id = ?').get(pid);
 
-  if (existing) {
-    return res.json({
-      ...existing,
-      photos_count: photos.length,
-      available_photos: photos,
-      pluviometry: pluv || null,
-      settings
-    });
-  }
+  // Extract unique upper-cased services from photos of this day
+  const serviceSet = new Set();
+  photos.forEach((p) => {
+    const t = String(p.title || '').trim().replace(/\s+/g, ' ').toUpperCase();
+    if (t) serviceSet.add(t);
+  });
+  const autoServices = [...serviceSet];
 
   // Calculate intelligent weather condition from pluviometry
   let autoWeather = 'BOM';
@@ -1644,14 +1652,23 @@ app.get('/api/rdo/by-date', authenticate, (req, res) => {
     }
   }
 
-  // Automatic services from photos of that day
-  const autoServices = photos.map((p) => p.title.trim()).filter(Boolean);
+  if (existing) {
+    return res.json({
+      exists: true,
+      ...existing,
+      photos_count: photos.length,
+      available_photos: photos,
+      suggested_services: autoServices,
+      pluviometry: pluv || null,
+      settings
+    });
+  }
 
   const maxFolio = db.prepare('SELECT MAX(folio_number) as maxF FROM rdo_records WHERE project_id = ?').get(pid);
   const nextFolio = (maxFolio?.maxF || 0) + 1;
-  const project = db.prepare('SELECT id, code, name FROM projects WHERE id = ?').get(pid);
 
   res.json({
+    exists: false,
     id: null,
     project_id: pid,
     project_code: project?.code || '',
@@ -1670,9 +1687,10 @@ app.get('/api/rdo/by-date', authenticate, (req, res) => {
     services_developed: JSON.stringify(autoServices),
     photos_count: photos.length,
     available_photos: photos,
+    suggested_services: autoServices,
     pluviometry: pluv || null,
     settings,
-    is_draft: true
+    status: 'draft'
   });
 });
 
@@ -1691,7 +1709,10 @@ app.post('/api/rdo', authenticate, (req, res) => {
     supervisor_notes,
     fiscal_notes,
     services_developed,
-    status
+    status,
+    final_signature,
+    finalized_at,
+    reopened_reason
   } = req.body;
 
   if (!project_id || !rdo_date) {
@@ -1715,9 +1736,10 @@ app.post('/api/rdo', authenticate, (req, res) => {
     INSERT INTO rdo_records (
       project_id, user_id, folio_number, rdo_date, weather_condition, work_code,
       work_force_count, work_force_sufficient, representative_engineer, representative_present,
-      contractor_notes, supervisor_notes, fiscal_notes, services_developed, status, updated_at
+      contractor_notes, supervisor_notes, fiscal_notes, services_developed, status,
+      final_signature, finalized_at, reopened_reason, updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(project_id, rdo_date) DO UPDATE SET
       folio_number = excluded.folio_number,
       weather_condition = excluded.weather_condition,
@@ -1731,6 +1753,9 @@ app.post('/api/rdo', authenticate, (req, res) => {
       fiscal_notes = excluded.fiscal_notes,
       services_developed = excluded.services_developed,
       status = excluded.status,
+      final_signature = excluded.final_signature,
+      finalized_at = excluded.finalized_at,
+      reopened_reason = excluded.reopened_reason,
       updated_at = CURRENT_TIMESTAMP
   `).run(
     pid,
@@ -1747,7 +1772,10 @@ app.post('/api/rdo', authenticate, (req, res) => {
     supervisor_notes || '',
     fiscal_notes || '',
     servicesJson,
-    status || 'EM_ANDAMENTO'
+    status || 'draft',
+    final_signature || '',
+    finalized_at || '',
+    reopened_reason || ''
   );
 
   const saved = db
@@ -1762,6 +1790,138 @@ app.post('/api/rdo', authenticate, (req, res) => {
   res.status(200).json(saved);
 });
 
+// Batch generation matching Relatorio-DER-PR 1.9.1 createRdoBatch behavior
+app.post('/api/rdo/batch', authenticate, (req, res) => {
+  const { project_id, defaults = {}, include_empty = false } = req.body;
+  if (!project_id) return res.status(400).json({ error: 'Informe a obra.' });
+
+  const pid = Number(project_id);
+  if (!canUserAccessProject(req.user, pid)) {
+    return res.status(403).json({ error: 'Sem permissão nesta obra.' });
+  }
+
+  const photos = db
+    .prepare('SELECT id, taken_at, title FROM photos WHERE project_id = ? ORDER BY taken_at ASC')
+    .all(pid);
+  const photoDates = [...new Set(photos.map((p) => p.taken_at).filter(Boolean))].sort();
+
+  if (photoDates.length === 0) {
+    return res.status(400).json({ error: 'Esta obra não tem fotos registradas com data válida.' });
+  }
+
+  let targetDates = [...photoDates];
+  if (include_empty) {
+    const start = new Date(photoDates[0] + 'T12:00:00Z');
+    const end = new Date(photoDates[photoDates.length - 1] + 'T12:00:00Z');
+    if ((+end - +start) / 86400000 > 366) {
+      return res.status(400).json({ error: 'O intervalo selecionado ultrapassa 366 dias.' });
+    }
+    targetDates = [];
+    for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
+      targetDates.push(d.toISOString().slice(0, 10));
+    }
+  }
+
+  const existingRdos = db.prepare('SELECT rdo_date, folio_number FROM rdo_records WHERE project_id = ?').all(pid);
+  const existingSet = new Set(existingRdos.map((r) => r.rdo_date));
+
+  const maxFolioRow = db.prepare('SELECT MAX(folio_number) as maxF FROM rdo_records WHERE project_id = ?').get(pid);
+  let nextFolio = (maxFolioRow?.maxF || 0) + 1;
+
+  const settings = db.prepare('SELECT * FROM report_settings WHERE id = 1').get() || {};
+  const project = db.prepare('SELECT id, code, name FROM projects WHERE id = ?').get(pid);
+
+  const created = [];
+  const skipped = [];
+
+  const insertStmt = db.prepare(`
+    INSERT INTO rdo_records (
+      project_id, user_id, folio_number, rdo_date, weather_condition, work_code,
+      work_force_count, work_force_sufficient, representative_engineer, representative_present,
+      contractor_notes, supervisor_notes, fiscal_notes, services_developed, status, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', CURRENT_TIMESTAMP)
+  `);
+
+  for (const date of targetDates) {
+    if (existingSet.has(date)) {
+      skipped.push(date);
+      continue;
+    }
+
+    const dayPhotos = photos.filter((p) => p.taken_at === date);
+    const serviceSet = new Set();
+    dayPhotos.forEach((p) => {
+      const t = String(p.title || '').trim().replace(/\s+/g, ' ').toUpperCase();
+      if (t) serviceSet.add(t);
+    });
+    const servicesList = [...serviceSet];
+
+    const pluv = db.prepare('SELECT * FROM pluviometry WHERE project_id = ? AND record_date = ?').get(pid, date);
+    let autoWeather = defaults.weather || 'BOM';
+    if (pluv) {
+      if (pluv.work_impact === 'PARALISACAO_TOTAL' || Number(pluv.rainfall_mm) >= 30 || pluv.afternoon_weather === 'IMPRATICAVEL') {
+        autoWeather = 'IMPRATICAVEL';
+      } else if (Number(pluv.rainfall_mm) > 0 || String(pluv.morning_weather).includes('CHUVA') || String(pluv.afternoon_weather).includes('CHUVA')) {
+        autoWeather = 'CHUVOSO';
+      } else if (pluv.morning_weather === 'NUBLADO' || pluv.afternoon_weather === 'NUBLADO') {
+        autoWeather = 'INSTAVEL';
+      }
+    }
+
+    const workForce = defaults.professionals !== null && defaults.professionals !== undefined && defaults.professionals !== ''
+      ? Number(defaults.professionals)
+      : null;
+
+    const sufficient = defaults.sufficient === 'SIM' ? 1 : defaults.sufficient === 'NAO' || defaults.sufficient === 'NÃO' ? 0 : 1;
+    const present = defaults.present === 'SIM' ? 1 : defaults.present === 'NAO' || defaults.present === 'NÃO' ? 0 : 1;
+
+    insertStmt.run(
+      pid,
+      req.user.id,
+      nextFolio++,
+      date,
+      autoWeather,
+      project?.code || settings.contract_number || '',
+      workForce !== null ? workForce : 0,
+      sufficient,
+      settings.contractor_representative || '',
+      present,
+      defaults.contractorNotes || '',
+      settings.supervisorNotes || settings.regional_superintendency || 'DER/PR SUPERINTENDÊNCIA REGIONAL NOROESTE',
+      settings.inspectorNotes || '',
+      JSON.stringify(servicesList)
+    );
+
+    created.push(date);
+  }
+
+  res.json({ created, skipped });
+});
+
+// Photo dates summary for batch preview
+app.get('/api/rdo/photo-dates', authenticate, (req, res) => {
+  const { projectId } = req.query;
+  if (!projectId) return res.status(400).json({ error: 'Informe a obra.' });
+
+  const pid = Number(projectId);
+  if (!canUserAccessProject(req.user, pid)) {
+    return res.status(403).json({ error: 'Sem permissão.' });
+  }
+
+  const photos = db.prepare('SELECT taken_at, COUNT(*) as count FROM photos WHERE project_id = ? GROUP BY taken_at ORDER BY taken_at ASC').all(pid);
+  const existingRdos = db.prepare('SELECT rdo_date, folio_number, status FROM rdo_records WHERE project_id = ?').all(pid);
+  const rdoMap = new Map(existingRdos.map((r) => [r.rdo_date, r]));
+
+  const summary = photos.map((p) => ({
+    date: p.taken_at,
+    photo_count: p.count,
+    has_rdo: rdoMap.has(p.taken_at),
+    rdo: rdoMap.get(p.taken_at) || null
+  }));
+
+  res.json({ dates: summary });
+});
+
 app.post('/api/rdo/sync-services', authenticate, (req, res) => {
   const { project_id, rdo_date } = req.body;
   if (!project_id || !rdo_date) {
@@ -1773,7 +1933,12 @@ app.post('/api/rdo/sync-services', authenticate, (req, res) => {
     .prepare('SELECT title, description FROM photos WHERE project_id = ? AND taken_at = ? ORDER BY id ASC')
     .all(pid, rdo_date);
 
-  const services = photos.map((p) => p.title.trim()).filter(Boolean);
+  const serviceSet = new Set();
+  photos.forEach((p) => {
+    const t = String(p.title || '').trim().replace(/\s+/g, ' ').toUpperCase();
+    if (t) serviceSet.add(t);
+  });
+  const services = [...serviceSet];
   res.json({ services });
 });
 

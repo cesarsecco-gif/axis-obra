@@ -220,10 +220,24 @@ function initDatabase() {
   ensureSamplePhotos();
   ensurePluviometryColumns();
   ensureReportSettingsColumns();
+  ensureRdoColumns();
   seedOccurrenceParamsIfEmpty();
   seedReportSettingsIfEmpty();
   seedIfEmpty();
-  seedRdoIfEmpty();
+}
+
+function ensureRdoColumns() {
+  const cols = db.prepare("PRAGMA table_info('rdo_records')").all().map((c) => c.name);
+  const additions = [
+    ['final_signature', "TEXT DEFAULT ''"],
+    ['finalized_at', "TEXT DEFAULT ''"],
+    ['reopened_reason', "TEXT DEFAULT ''"]
+  ];
+  for (const [colName, colDef] of additions) {
+    if (!cols.includes(colName)) {
+      db.exec(`ALTER TABLE rdo_records ADD COLUMN ${colName} ${colDef};`);
+    }
+  }
 }
 
 function ensureReportSettingsColumns() {
@@ -745,7 +759,12 @@ function seedIfEmpty() {
 }
 
 function seedRdoIfEmpty() {
-  const countRow = db.prepare('SELECT COUNT(*) as total FROM rdo_records').get();
+  // RDOs não são semeados artificialmente para dias sem dados;
+  // eles devem ser criados pelo usuário ou pelo gerador de lote com base nas fotos/atividades reais.
+  return;
+}
+
+function _unusedSeedRdo() {
   if (countRow && countRow.total > 0) return;
 
   const proj = db.prepare("SELECT id FROM projects WHERE code = 'OBR-2026-001'").get() || db.prepare('SELECT id FROM projects LIMIT 1').get();
