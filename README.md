@@ -4,22 +4,38 @@ Sistema Full-Stack (Node.js/Express + SQLite nativo + React/Vite/Tailwind CSS) p
 
 ---
 
-## 🏗️ Módulos Inclusos
+## 🏗️ Módulos
 
-1. **Registro Fotográfico**: Upload de fotos de campo por etapa construtiva, localização, condição climática, autor e carimbo técnico.
-2. **Registro de Ocorrências**: Controle de não conformidades, incidentes, atrasos, grau de severidade, status e plano de ação.
-3. **Cadastro de Funcionários**: Gestão de efetivo próprio (`CLT`) e terceirizado (`TERCEIRIZADO`/`PJ`), funções, diárias, validade de ASO, certificações NR e obra alocada.
-4. **Cadastro de Equipamentos**: Controle patrimonial (`PRÓPRIO`) e de locação (`LOCADO`), TAG, custo diário, status operacional e manutenção preventiva.
-5. **Gerenciamento de Obras por Usuário (RBAC)**:
-   - **Administrador (`ADMIN`)**: Acesso irrestrito a todas as obras e matriz de permissões para vincular/desvincular obras por usuário.
-   - **Engenheiro / Encarregado / Fiscal**: Visualiza e opera exclusivamente nas obras às quais está vinculado.
-6. **Registro de Pluviometria**: Boletim climático diário por turno (Manhã/Tarde/Noite), precipitação em milímetros (`mm`), horas paradas e gráfico pluviométrico.
+1. **Registro Fotográfico** — fotos por etapa construtiva, local e data; relatório fotográfico A4 (PDF/Excel).
+2. **Diário de Obras (RDO, padrão DER/PR)** — calendário, geração em lote a partir das fotos, finalização com bloqueio da folha, reabertura com motivo e histórico.
+3. **Registro de Ocorrências** — não conformidades com fotos por fase, prazos, histórico de status, indicadores de SLA e relatórios.
+4. **Cadastro de Funcionários** — efetivo CLT/terceirizado/PJ, ASO, NRs e diárias.
+5. **Cadastro de Equipamentos** — próprios e locados, custos e manutenção preventiva.
+6. **Obras por Usuário** — cadastro de obras e usuários; cada usuário acessa apenas as obras vinculadas.
+7. **Registro de Pluviometria** — chuva em mm por turno, importação de CSV do INMET, gráficos e quadros analíticos.
+8. **Configurações** — campos de ocorrência, cabeçalhos dos relatórios e backup do banco de dados.
+
+### Perfis de acesso
+
+| Perfil | O que pode fazer |
+| :--- | :--- |
+| `ADMIN` | Tudo, em todas as obras: usuários, permissões, configurações, backup. |
+| `ENGENHEIRO` | Opera as obras vinculadas; finaliza, reabre e exclui RDO; altera configurações de relatórios. |
+| `ENCARREGADO` | Registra fotos, RDO (rascunho), ocorrências e pluviometria nas obras vinculadas. Não finaliza nem exclui RDO. |
+| `FISCAL` | Somente consulta das obras vinculadas. |
+
+### Acesso
+
+- **Administrador principal:** `cesarsecco@gmail.com` — senha inicial `123456` (**troque no primeiro acesso** em *Alterar Senha*).
+- Login por **e-mail e senha** ou por **código de 6 dígitos enviado por e-mail**.
+- **Esqueci minha senha:** o usuário recebe um código por e-mail e cria uma nova senha.
+- As opções por e-mail exigem SMTP configurado (veja *Variáveis de ambiente*).
 
 ---
 
 ## 💻 Como Rodar Localmente (No PC)
 
-Requer **Node.js 22.5+** (ou superior, pois utiliza o módulo nativo `node:sqlite`).
+Requer **Node.js 22.5+** (usa o módulo nativo `node:sqlite`).
 
 ```bash
 # 1. Instalar dependências do backend e frontend
@@ -30,7 +46,27 @@ npm run start:backend
 
 # 3. Em outro terminal, iniciar o Frontend em modo dev (porta 5173)
 npm run start:frontend
+
+# Testes automáticos da API
+npm test
 ```
+
+Sem SMTP configurado, fora de produção, os códigos enviados "por e-mail" aparecem no **terminal do backend**.
+
+---
+
+## ⚙️ Variáveis de ambiente
+
+Veja o arquivo [`.env.example`](.env.example). As principais:
+
+| Variável | Para que serve |
+| :--- | :--- |
+| `TOKEN_SECRET` | Assinatura das sessões. Se ausente, é gerado e salvo em `backend/data/.token_secret`. |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | Envio dos códigos de acesso e de recuperação de senha. |
+| `ADMIN_EMAIL`, `ADMIN_NAME`, `ADMIN_INITIAL_PASSWORD` | Administrador principal criado na inicialização, se ainda não existir. |
+| `CORS_ORIGIN` | Só se o frontend for hospedado em outro domínio. |
+
+**Gmail como SMTP:** ative a verificação em duas etapas na conta, gere uma *Senha de app* em <https://myaccount.google.com/apppasswords> e use `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=465`, `SMTP_SECURE=true`, `SMTP_USER=<seu e-mail>` e `SMTP_PASS=<senha de app>`.
 
 ---
 
@@ -78,7 +114,7 @@ cd /var/www/axis-obra
 
 ### 3. Deploy Automático pelo GitHub (GitHub Actions)
 
-O repositório já possui o workflow `.github/workflows/deploy.yml`. Para que a sua VPS seja atualizada **automaticamente** sempre que você alterar qualquer arquivo pelo GitHub (mesmo pelo celular ou outro computador), adicione os seguintes **Secrets** no seu repositório GitHub (*Settings > Secrets and variables > Actions > New repository secret*):
+O repositório traz um modelo de workflow em `deploy/github-actions-deploy.yml`. Copie-o para `.github/workflows/deploy.yml` para ativá-lo. Para que a sua VPS seja atualizada **automaticamente** sempre que você alterar qualquer arquivo pelo GitHub (mesmo pelo celular ou outro computador), adicione os seguintes **Secrets** no seu repositório GitHub (*Settings > Secrets and variables > Actions > New repository secret*):
 
 - `VPS_HOST`: IP ou domínio da sua VPS
 - `VPS_USER`: Usuário SSH da VPS (ex: `root` ou `ubuntu`)

@@ -1,7 +1,7 @@
 # 📘 Documentação Oficial do Sistema — AXIS OBRA
 
-**Sistema Integrado de Gerenciamento de Obras e Engenharia Civil**  
-**Versão:** 1.0.0  
+**Sistema Integrado de Gerenciamento de Obras e Engenharia Civil**
+**Versão:** 1.1.0
 **Repositório Oficial:** `https://github.com/cesarsecco-gif/axis-obra`
 
 ---
@@ -11,26 +11,18 @@
 1. [Visão Geral do Sistema](#1-visão-geral-do-sistema)
 2. [Arquitetura e Tecnologias Utilizadas](#2-arquitetura-e-tecnologias-utilizadas)
 3. [Estrutura de Diretórios do Projeto](#3-estrutura-de-diretórios-do-projeto)
-4. [Controle de Acesso e Perfis de Usuário (RBAC)](#4-controle-de-acesso-e-perfis-de-usuário-rbac)
+4. [Acesso, Autenticação e Perfis de Usuário](#4-acesso-autenticação-e-perfis-de-usuário)
 5. [Manual dos Módulos do Sistema](#5-manual-dos-módulos-do-sistema)
-   - [5.1. Módulo 1 — Registro Fotográfico](#51-módulo-1--registro-fotográfico)
-   - [5.2. Módulo 2 — Diário de Obras (RDO Padrão DER/PR)](#52-módulo-2--diário-de-obras-rdo-padrão-derpr)
-   - [5.3. Módulo 3 — Registro de Ocorrências](#53-módulo-3--registro-de-ocorrências)
-   - [5.4. Módulo 4 — Cadastro de Funcionários](#54-módulo-4--cadastro-de-funcionários)
-   - [5.5. Módulo 5 — Cadastro de Equipamentos](#55-módulo-5--cadastro-de-equipamentos)
-   - [5.6. Módulo 6 — Gerenciamento de Obras por Usuário](#56-módulo-6--gerenciamento-de-obras-por-usuário)
-   - [5.7. Módulo 7 — Registro de Pluviometria e Análise INMET](#57-módulo-7--registro-de-pluviometria-e-análise-inmet)
-   - [5.8. Módulo 8 — Configurações Gerais do Sistema](#58-módulo-8--configurações-gerais-do-sistema)
 6. [Modelagem do Banco de Dados (SQLite)](#6-modelagem-do-banco-de-dados-sqlite)
 7. [Referência da API REST (Endpoints)](#7-referência-da-api-rest-endpoints)
-8. [Infraestrutura, Deploy no Coolify e Persistência de Dados](#8-infraestrutura-deploy-no-coolify-e-persistência-de-dados)
-9. [Credenciais Padrão e Contas de Demonstração](#9-credenciais-padrão-e-contas-de-demonstração)
+8. [Infraestrutura, Deploy e Variáveis de Ambiente](#8-infraestrutura-deploy-e-variáveis-de-ambiente)
+9. [Testes Automatizados](#9-testes-automatizados)
 
 ---
 
 ## 1. Visão Geral do Sistema
 
-O **AXIS OBRA** é uma plataforma web *Full-Stack* desenvolvida para construtoras, incorporadoras e equipes de engenharia de campo. O objetivo central do sistema é consolidar o acompanhamento diário de obras (RDO Digital), garantindo rastreabilidade técnica, controle de efetivo e equipamentos, registro climático/pluviométrico, documentação fotográfica e gestão de não conformidades, com **isolamento de acesso às obras por usuário**.
+O **AXIS OBRA** é uma plataforma web *Full-Stack* para construtoras e equipes de engenharia de campo, com foco em obras rodoviárias (padrão DER/PR). Consolida o acompanhamento diário de obras (RDO digital), o registro fotográfico, o controle de efetivo e equipamentos, a pluviometria e a gestão de ocorrências, com **acesso de cada usuário somente às obras em que atua**.
 
 ---
 
@@ -38,204 +30,228 @@ O **AXIS OBRA** é uma plataforma web *Full-Stack* desenvolvida para construtora
 
 | Camada | Tecnologia | Descrição |
 | :--- | :--- | :--- |
-| **Frontend** | React 18 + Vite 6 | Interface SPA (Single Page Application) rápida e responsiva para uso em desktop, tablet ou smartphone em obra. |
-| **Estilização** | Tailwind CSS 3 + Lucide Icons | Design system industrial de alto contraste adaptado para leitura rápida em campo. |
-| **Backend** | Node.js (v22+) + Express 4 | API RESTful responsável pela autenticação, regras de negócio, RBAC e entrega dos arquivos estáticos. |
-| **Banco de Dados** | SQLite Nativo (`node:sqlite`) | Banco relacional transacional em modo `WAL` (*Write-Ahead Logging*) para alta performance e zero dependência de compilação externa. |
-| **Armazenamento de Mídia** | Multer + File System (`/uploads`) | Suporte a upload de imagens via `multipart/form-data` e geração de carimbo técnico em SVG/Base64. |
-| **Autenticação** | Token Assinado HMAC-SHA256 | Autenticação stateless via cabeçalho `Authorization: Bearer <token>`. |
-| **Containerização** | Docker (`node:22-alpine`) + Coolify | Imagem Docker unificada que compila o frontend e executa o backend na porta `3001`. |
+| **Frontend** | React 18 + Vite 6 | SPA responsiva (computador, tablet e celular). Módulos carregados sob demanda. |
+| **Estilização** | Tailwind CSS 3 + Lucide Icons | Visual de alto contraste para leitura em campo. |
+| **Backend** | Node.js 22.5+ + Express 4 | API REST: autenticação, regras de negócio, permissões e entrega do frontend compilado. |
+| **Banco de Dados** | SQLite nativo (`node:sqlite`) | Modo WAL, chaves estrangeiras ativas, migrações aditivas na inicialização. |
+| **Arquivos** | Multer + disco (`backend/uploads`) | Somente imagens; servidas com `nosniff` e `Content-Security-Policy: sandbox`. |
+| **Autenticação** | Token HMAC-SHA256 (7 dias) | Cabeçalho `Authorization: Bearer <token>`. Senhas com `scrypt` e salt por usuário. |
+| **E-mail** | Nodemailer (SMTP) | Código de acesso e recuperação de senha. |
+| **Containerização** | Docker (`node:22-alpine`) + Coolify | Imagem única que compila o frontend e executa o backend na porta `3001`. |
 
 ---
 
 ## 3. Estrutura de Diretórios do Projeto
 
 ```text
-AXIS OBRA/
+axis-obra/
 ├── backend/
-│   ├── data/
-│   │   └── axis_obra.db              # Banco de dados SQLite (persistido via volume na VPS)
-│   ├── uploads/                      # Fotos de obra enviadas pelos usuários (persistido via volume)
+│   ├── data/                       # axis_obra.db e .token_secret (volume persistente; fora do git)
+│   ├── uploads/                    # Fotos enviadas (volume persistente; fora do git)
 │   ├── src/
-│   │   ├── db.js                     # Criação de tabelas, migrations e seed inicial
-│   │   └── server.js                 # Servidor Express, rotas da API REST, RBAC e healthcheck
+│   │   ├── db.js                   # Tabelas, migrações, administrador principal e dados de demonstração
+│   │   ├── mailer.js               # Envio de e-mails (SMTP)
+│   │   └── server.js               # Rotas da API, autenticação, permissões e regras de negócio
+│   ├── test/api.test.js            # Testes automatizados da API (node:test)
 │   └── package.json
 ├── frontend/
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── DashboardView.jsx     # Painel gerencial consolidado
-│   │   │   ├── PhotosView.jsx        # Módulo 1: Registro Fotográfico
-│   │   │   ├── OccurrencesView.jsx   # Módulo 2: Registro de Ocorrências
-│   │   │   ├── EmployeesView.jsx     # Módulo 3: Cadastro de Funcionários
-│   │   │   ├── EquipmentsView.jsx    # Módulo 4: Cadastro de Equipamentos
-│   │   │   ├── ProjectsUsersView.jsx # Módulo 5: Gerenciamento de Obras por Usuário
-│   │   │   └── PluviometryView.jsx   # Módulo 6: Registro de Pluviometria
-│   │   ├── api.js                    # Cliente HTTP, controle de sessão JWT e formatadores
-│   │   ├── App.jsx                   # Layout principal, barra lateral, login e filtro global de obra
-│   │   ├── main.jsx                  # Ponto de entrada do React
-│   │   └── index.css                 # Estilos globais Tailwind CSS
-│   ├── index.html
-│   ├── vite.config.js
-│   └── package.json
-├── deploy/
-│   └── github-actions-deploy.yml     # Template opcional para CI/CD via GitHub Actions
-├── Dockerfile                        # Configuração de imagem de produção para o Coolify
-├── docker-compose.yml                # Orquestração Docker com volumes nomeados
-├── deploy.sh                         # Script auxiliar para deploy manual em servidor Linux
-├── ecosystem.config.cjs              # Configuração para PM2
-├── DOCUMENTACAO_SISTEMA.md           # Este documento
-└── README.md                         # Guia rápido do repositório
+│   └── src/
+│       ├── App.jsx                 # Layout, menu, filtro global de obra, sessão
+│       ├── api.js                  # Cliente HTTP, sessão e formatadores
+│       └── components/
+│           ├── LoginView.jsx           # Login por senha, por código e recuperação de senha
+│           ├── ChangePasswordModal.jsx # Alterar a própria senha
+│           ├── EditUserModal.jsx       # Edição/desativação de usuário e nova senha (ADMIN)
+│           ├── DashboardView.jsx       # Painel consolidado
+│           ├── PhotosView.jsx          # Módulo 1
+│           ├── PhotoReportModal.jsx    # Relatório fotográfico (PDF/Excel)
+│           ├── RdoView.jsx             # Módulo 2
+│           ├── OccurrencesView.jsx     # Módulo 3
+│           ├── EmployeesView.jsx       # Módulo 4
+│           ├── EquipmentsView.jsx      # Módulo 5
+│           ├── ProjectsUsersView.jsx   # Módulo 6
+│           ├── PluviometryView.jsx     # Módulo 7
+│           └── SettingsView.jsx        # Módulo 8
+├── deploy/github-actions-deploy.yml    # Modelo de CI/CD (copiar para .github/workflows/)
+├── docs/RELATORIO_ANALISE.md           # Relatório técnico e próximos passos
+├── .env.example                        # Variáveis de ambiente
+├── Dockerfile / docker-compose.yml     # Imagem e orquestração com volumes
+├── deploy.sh / ecosystem.config.cjs    # Deploy manual com PM2
+└── README.md
 ```
 
 ---
 
-## 4. Controle de Acesso e Perfis de Usuário (RBAC)
+## 4. Acesso, Autenticação e Perfis de Usuário
 
-O sistema implementa controle de acesso baseado em função (*Role-Based Access Control*) combinado com vínculo explícito por obra (`project_users`):
+### 4.1 Formas de login
+1. **E-mail e senha.**
+2. **Código por e-mail:** o usuário informa o e-mail e recebe um código de 6 dígitos (válido por 10 minutos, uso único, até 5 tentativas).
+3. **Esqueci minha senha:** código por e-mail + nova senha.
 
-1. **`ADMIN` (Administrador Geral / Diretoria)**:
-   - Visualiza e edita **todas as obras** cadastradas no sistema automaticamente.
-   - Pode cadastrar novas obras e excluir obras existentes.
-   - Pode cadastrar novos usuários e definir na **Matriz de Permissões** quais obras cada usuário pode acessar.
-2. **`ENGENHEIRO` (Engenheiro Civil / Residente)**:
-   - Visualiza no painel, no seletor global e nos módulos operacionais **apenas as obras às quais foi vinculado** pelo Administrador.
-   - Pode registrar fotos, ocorrências, pluviometria, funcionários e equipamentos dentro de suas obras vinculadas.
-3. **`ENCARREGADO` (Mestre de Obras / Encarregado de Campo)**:
-   - Visualiza e alimenta registros diários (fotos, ocorrências, pluviometria, efetivo) **exclusivamente nas obras em que está alocado**.
-4. **`FISCAL` (Fiscalização / Cliente)**:
-   - Acesso restrito às obras vinculadas ao seu perfil para acompanhamento técnico e auditoria.
+Proteções: limite de tentativas de login sem sucesso (por e-mail e por IP), limite de pedidos de código, resposta idêntica para e-mails cadastrados ou não, senhas com `scrypt`.
+
+### 4.2 Administrador principal
+Na inicialização o sistema garante a existência do administrador `cesarsecco@gmail.com` (configurável por `ADMIN_EMAIL`). A senha inicial (`123456`, ou `ADMIN_INITIAL_PASSWORD`) só é definida na criação — **troque-a no primeiro acesso** em *Alterar Senha*.
+
+### 4.3 Perfis
+
+| Perfil | Permissões |
+| :--- | :--- |
+| `ADMIN` | Acesso a todas as obras. Cadastra/edita/desativa usuários, define senhas, vincula obras, simula o acesso de outro usuário, baixa backup. |
+| `ENGENHEIRO` | Obras vinculadas. Finaliza, reabre (com motivo) e exclui RDO. Altera configurações de relatórios e campos de ocorrência. |
+| `ENCARREGADO` | Obras vinculadas. Registra fotos, ocorrências, pluviometria, efetivo, equipamentos e RDO em rascunho. |
+| `FISCAL` | Obras vinculadas, **somente consulta**. |
+
+**Simular acesso:** em *Obras por Usuário*, o Administrador pode ver o sistema exatamente como outro usuário vê. Uma faixa amarela indica a simulação e permite voltar ao Administrador.
 
 ---
 
-## 5. Manual dos 6 Módulos do Sistema
+## 5. Manual dos Módulos do Sistema
 
-### 5.1. Módulo 1 — Registro Fotográfico
-- **Finalidade**: Documentar visualmente o avanço físico e a qualidade executiva da obra.
-- **Funcionalidades**:
-  - Upload de fotos direto do computador ou câmera do celular (`JPG`, `PNG`, `WEBP`, `SVG` até 15 MB).
-  - Gerador integrado de **Carimbo Técnico de Demonstração** com dados da obra, etapa e data.
-  - Classificação por **Etapa Construtiva**: *Terraplanagem, Fundação, Estrutura, Alvenaria, Instalações, Cobertura, Acabamento, Segurança (NR-18)* e *Vistoria*.
-  - Registro de localização/pavimento, data da captura, condição climática no momento da foto e responsável técnico.
-  - Galeria com busca textual, filtro por etapa e visualização ampliada (*Lightbox*).
+### 5.1 Módulo 1 — Registro Fotográfico
+Upload múltiplo de fotos (JPG, PNG, WEBP, GIF até 15 MB) por etapa construtiva, local e data; edição individual; agrupamento por ano/mês/data/etapa; relatório fotográfico A4 em PDF e Excel com cabeçalho configurável.
 
-### 5.2. Módulo 2 — Registro de Ocorrências
-- **Finalidade**: Registrar fatos relevantes, acidentes/incidentes, atrasos de fornecedores, falhas de equipamentos e não conformidades.
-- **Gerenciador de Campos Personalizáveis**:
-  - Possui uma aba dedicada (**⚙️ Gerenciar Campos**) onde o usuário pode cadastrar, editar (nome e cor da etiqueta) ou excluir opções para os 4 parâmetros estruturais:
-    1. **Categoria / Tipo** (`TYPE`)
-    2. **Grau de Severidade** (`SEVERITY`)
-    3. **Status** (`STATUS`)
-    4. **Setor / Frente de Serviço** (`SECTOR`)
-- **Funcionalidades**:
-  - Categorização dinâmica por tipo, grau de severidade, status e setor/frente de serviço.
-  - Registro obrigatório da descrição do fato e campo específico para **Providências Adotadas / Plano de Ação**.
-  - Botões rápidos na listagem para avançar o status da ocorrência em 1 clique.
+### 5.2 Módulo 2 — Diário de Obras (RDO, padrão DER/PR)
+- Calendário com marcação dos dias que têm fotos e/ou RDO; filtro rápido por mês/ano.
+- Serviços do dia sugeridos a partir dos títulos das fotos; clima sugerido a partir da pluviometria.
+- **Geração em lote:** dias com foto, período completo ou intervalo escolhido (transação única).
+- **Número da folha** sequencial por obra, definido pelo servidor.
+- **Finalização:** bloqueia a folha (não pode ser editada nem excluída). Reabertura somente por Engenheiro/Administrador, com motivo obrigatório. Histórico de criação, finalização e reabertura.
+- Impressão/PDF em uma folha A4.
 
-### 5.3. Módulo 3 — Cadastro de Funcionários
-- **Finalidade**: Controlar o efetivo próprio e terceirizado alocado em cada canteiro.
-- **Funcionalidades**:
-  - Dados cadastrais: Nome completo, CPF (único), Matrícula interna (`FUNC-XXX`), Telefone e Função/Cargo.
-  - Regime de contratação: `CLT` (Próprio), `TERCEIRIZADO` (Empreiteira) ou `PJ`, com identificação da empresa.
-  - Controle de Segurança do Trabalho: Data de vencimento do **ASO** (Atestado de Saúde Ocupacional) e **Certificações NR** (`NR-10`, `NR-18`, `NR-33`, `NR-35`).
-  - Gestão financeira de campo: Valor da diária (`R$`) e cálculo automático do custo diário do efetivo ativo.
-  - Status do colaborador: `ATIVO`, `FERIAS`, `AFASTADO` ou `INATIVO`.
+### 5.3 Módulo 3 — Registro de Ocorrências
+Categoria, severidade, status e setor configuráveis (Módulo 8); prazo e data de resolução; fotos por fase (registro, tratativa, conclusão) reduzidas automaticamente antes do envio; histórico de mudanças de status; indicadores de SLA/lead time; relatórios por status (PDF/Excel).
 
-### 5.4. Módulo 4 — Cadastro de Equipamentos
-- **Finalidade**: Controlar o parque de máquinas, ferramentas e equipamentos próprios ou alugados.
-- **Funcionalidades**:
-  - Identificação por **Código / TAG patrimonial** único (ex: `EQP-001`), nome, marca, modelo e número de série.
-  - Categorias: *Linha Amarela/Pesado, Transporte Vertical (Grua/Cremalheira), Concretagem, Ferramental Elétrico, Andaimes/Escoramento, Topografia/Medição, Proteção Coletiva* e *Outros*.
-  - Controle de propriedade (`PROPRIO` vs `LOCADO`), nome da locadora/fornecedor e custo diário (`R$`).
-  - Monitoramento de manutenção: Datas da **Última Manutenção** e **Próxima Preventiva**, além de status (`OPERACIONAL`, `DISPONIVEL`, `EM_MANUTENCAO`, `INDISPONIVEL`).
+### 5.4 Módulo 4 — Cadastro de Funcionários
+Nome, CPF, matrícula, função, regime (CLT/terceirizado/PJ), empresa, diária, validade do ASO, certificações NR e status.
 
-### 5.5. Módulo 5 — Gerenciamento de Obras por Usuário
-- **Finalidade**: Administrar o portfólio de obras e gerenciar quais profissionais têm acesso a cada canteiro.
-- **Submódulo A — Obras Vinculadas**:
-  - Cadastro de obras com código (`OBR-AAAA-NNN`), nome, cliente, endereço completo, datas de início e término previsto, orçamento (`R$`), área construída ($m^2$), status e percentual de avanço físico (`0%` a `100%`).
-- **Submódulo B — Matriz de Acesso por Usuário**:
-  - Tabela interativa onde o Administrador visualiza todos os usuários e ativa/desativa o vínculo com cada obra com 1 clique.
-  - Cadastro de novos usuários já definindo suas obras iniciais.
-  - Recurso **Simular Acesso** para testar imediatamente a visão restrita de qualquer Engenheiro ou Encarregado.
+### 5.5 Módulo 5 — Cadastro de Equipamentos
+TAG, nome, categoria, marca/modelo/série, próprio ou locado, locadora, custo diário, status e datas de manutenção.
 
-### 5.6. Módulo 6 — Registro de Pluviometria
-- **Finalidade**: Registrar o boletim meteorológico diário da obra para fins de RDO e justificativa contratual de prazos.
-- **Funcionalidades**:
-  - Condição climática detalhada nos 3 turnos (**Manhã**, **Tarde** e **Noite**): *Sol, Nublado, Chuva Fraca, Chuva Forte, Impraticável* ou *Sem Expediente*.
-  - Medição do índice pluviométrico diário em **milímetros (`mm`)** ($1\text{ mm} = 1\text{ L/m}^2$).
-  - Registro de temperaturas mínima e máxima (°C), impacto na obra (`SEM_IMPACTO`, `IMPACTO_PARCIAL`, `PARALISACAO_TOTAL`) e **horas paralisadas**.
-  - Gráfico de barras integrado exibindo a evolução das chuvas nos últimos dias registrados.
+### 5.6 Módulo 6 — Obras por Usuário
+Cadastro de obras e matriz de acesso usuário × obra. Administrador cria usuários (senha inicial opcional), edita dados e perfil, desativa/reativa e define nova senha.
+
+### 5.7 Módulo 7 — Registro de Pluviometria
+Clima por turno, chuva em mm (total e por turno), temperaturas, impacto e horas paradas; importação de CSV do INMET; gráficos diário/mensal; quadros analíticos em PDF/Excel.
+
+### 5.8 Módulo 8 — Configurações do Sistema
+Opções dos campos de ocorrência (com restauração do padrão), dados do contrato e cabeçalhos dos relatórios, e **backup do banco de dados** (Administrador).
 
 ---
 
 ## 6. Modelagem do Banco de Dados (SQLite)
 
-O banco de dados `axis_obra.db` é composto por **8 tabelas relacionais** com integridade referencial (`FOREIGN KEYS = ON`):
+Arquivo `backend/data/axis_obra.db` — 15 tabelas, `FOREIGN KEYS = ON`. Migrações são **aditivas** (`ensure*Columns`) e rodam a cada inicialização.
 
-1. **`users`**: Armazena os usuários do sistema (`id`, `name`, `email`, `password_hash`, `role`, `crea_cft`, `phone`, `active`, `created_at`).
-2. **`projects`**: Cadastro das obras (`id`, `code`, `name`, `client`, `address`, `city`, `state`, `start_date`, `expected_end_date`, `status`, `progress`, `budget`, `area_m2`, `description`, `created_at`).
-3. **`project_users`**: Tabela associativa N:N que define o **Gerenciamento de Obras por Usuário** (`id`, `project_id`, `user_id`, `role_in_project`, `can_edit`, `assigned_at`).
-4. **`employees`**: Cadastro de funcionários alocados (`id`, `name`, `cpf`, `registration_number`, `role`, `contract_type`, `company`, `phone`, `daily_rate`, `aso_expiry`, `nr_certifications`, `status`, `project_id`, `created_at`).
-5. **`equipments`**: Cadastro de equipamentos e maquinário (`id`, `code`, `name`, `category`, `brand`, `model`, `serial_number`, `ownership`, `supplier`, `daily_cost`, `status`, `last_maintenance`, `next_maintenance`, `project_id`, `notes`, `created_at`).
-6. **`photos`**: Registros fotográficos de evolução (`id`, `project_id`, `user_id`, `title`, `description`, `stage`, `location_area`, `taken_at`, `image_url`, `weather_condition`, `created_at`).
-7. **`occurrences`**: Livro de ocorrências e não conformidades (`id`, `project_id`, `user_id`, `title`, `type`, `severity`, `status`, `occurrence_date`, `location_area`, `description`, `action_taken`, `responsible`, `created_at`).
-8. **`pluviometry`**: Boletins diários de pluviometria (`id`, `project_id`, `user_id`, `record_date`, `morning_weather`, `afternoon_weather`, `night_weather`, `rainfall_mm`, `work_impact`, `hours_lost`, `temperature_min`, `temperature_max`, `notes`, `created_at`).
+| Tabela | Conteúdo |
+| :--- | :--- |
+| `users` | Usuários (`role`, `active`, `password_hash` no formato `scrypt$salt$hash`). |
+| `projects` | Obras. |
+| `project_users` | Vínculo N:N usuário × obra. |
+| `employees` | Funcionários. |
+| `equipments` | Equipamentos. |
+| `photos` | Registro fotográfico. |
+| `occurrences` | Ocorrências (+ `due_date`, `resolved_at`, `updated_at`). |
+| `occurrence_photos` | Fotos das ocorrências por fase. |
+| `occurrence_history` | Histórico de status das ocorrências. |
+| `occurrence_params` | Opções configuráveis (TYPE, SEVERITY, STATUS, SECTOR). |
+| `pluviometry` | Boletins pluviométricos diários. |
+| `report_settings` | Linha única com cabeçalhos/dados do contrato para relatórios. |
+| `rdo_records` | RDOs (único por obra+data e por obra+folha; `status` = `draft`/`final`). |
+| `rdo_history` | Histórico do RDO (CRIADO, FINALIZADO, REABERTO). |
+| `auth_codes` | Códigos de acesso/recuperação (somente o hash, com validade e tentativas). |
 
 ---
 
 ## 7. Referência da API REST (Endpoints)
 
-Todas as rotas (exceto `/api/health`, `/api/auth/login` e `/api/auth/demo-users`) exigem autenticação e aplicam automaticamente o filtro de permissão de obras do usuário autenticado:
+Todas as rotas, exceto as marcadas como públicas, exigem `Authorization: Bearer <token>` e aplicam o filtro de obras do usuário.
 
 | Método | Rota | Descrição |
 | :--- | :--- | :--- |
-| `GET` | `/api/health` | Healthcheck de monitoramento para Docker / Coolify. |
-| `POST` | `/api/auth/login` | Autentica usuário por `email`/`password` e retorna token assinado. |
-| `GET` | `/api/auth/me` | Retorna os dados do usuário logado e IDs das obras permitidas. |
-| `GET` | `/api/dashboard` | Indicadores consolidados filtrados pelas obras do usuário (ou `?projectId=`). |
-| `GET / POST` | `/api/projects` | Lista obras permitidas ao usuário / Cadastra nova obra (`ADMIN`). |
-| `PUT / DELETE` | `/api/projects/:id` | Atualiza dados e avanço físico da obra / Remove obra (`ADMIN`). |
-| `POST / DELETE` | `/api/projects/:id/users` | Vincula ou desvincula acesso de um usuário a uma obra (`ADMIN`). |
-| `GET / POST` | `/api/users` | Lista usuários e suas obras vinculadas / Cria novo usuário (`ADMIN`). |
-| `GET / POST` | `/api/employees` | Lista e cadastra funcionários nas obras permitidas. |
-| `PUT / DELETE` | `/api/employees/:id` | Atualiza ou remove cadastro de funcionário. |
-| `GET / POST` | `/api/equipments` | Lista e cadastra equipamentos nas obras permitidas. |
-| `PUT / DELETE` | `/api/equipments/:id` | Atualiza ou remove equipamento. |
-| `GET / POST` | `/api/photos` | Lista fotos (filtro por `projectId` e `stage`) / Faz upload de nova foto. |
-| `DELETE` | `/api/photos/:id` | Exclui um registro fotográfico. |
-| `GET / POST` | `/api/occurrences` | Lista e registra ocorrências (filtro por `projectId`, `status`, `severity`). |
-| `PUT / DELETE` | `/api/occurrences/:id` | Atualiza status/providências ou remove ocorrência. |
-| `GET / POST` | `/api/pluviometry` | Lista e registra boletim pluviométrico diário. |
-| `DELETE` | `/api/pluviometry/:id` | Exclui registro pluviométrico. |
+| `GET` | `/api/health` | Público. Healthcheck. |
+| `GET` | `/api/auth/options` | Público. Informa se o login por código está disponível. |
+| `POST` | `/api/auth/login` | Público. Login com `email` e `password`. |
+| `POST` | `/api/auth/request-code` | Público. Envia código por e-mail (`purpose`: `LOGIN` ou `RESET`). |
+| `POST` | `/api/auth/login-code` | Público. Login com `email` e `code`. |
+| `POST` | `/api/auth/reset-password` | Público. Nova senha com `email`, `code` e `newPassword`. |
+| `GET` | `/api/auth/me` | Usuário logado e obras permitidas. |
+| `PUT` | `/api/auth/password` | Alterar a própria senha (`currentPassword`, `newPassword`). |
+| `POST` | `/api/auth/impersonate` | ADMIN. Simular acesso de outro usuário (`userId`). |
+| `POST` | `/api/auth/stop-impersonation` | Encerrar simulação e voltar ao ADMIN. |
+| `GET` | `/api/admin/backup` | ADMIN. Download do banco de dados. |
+| `GET` | `/api/dashboard` | Indicadores consolidados (`?projectId=`). |
+| `GET / POST` | `/api/projects` | Listar obras permitidas / cadastrar (ADMIN). |
+| `PUT / DELETE` | `/api/projects/:id` | Atualizar / remover obra (ADMIN). |
+| `POST` | `/api/projects/:id/users` | Vincular usuário à obra (ADMIN). |
+| `DELETE` | `/api/projects/:id/users/:userId` | Desvincular (ADMIN). |
+| `GET / POST` | `/api/users` | ADMIN. Listar / cadastrar usuários. |
+| `PUT` | `/api/users/:id` | ADMIN. Editar dados, perfil e ativo/inativo. |
+| `PUT` | `/api/users/:id/password` | ADMIN. Definir nova senha. |
+| `PUT` | `/api/users/:id/projects` | ADMIN. Redefinir obras do usuário. |
+| `GET / POST` | `/api/employees` | Funcionários. |
+| `PUT / DELETE` | `/api/employees/:id` | Funcionário. |
+| `GET / POST` | `/api/equipments` | Equipamentos. |
+| `PUT / DELETE` | `/api/equipments/:id` | Equipamento. |
+| `GET / PUT` | `/api/report-settings` | Configurações de relatório (alteração: ADMIN/ENGENHEIRO). |
+| `GET / POST` | `/api/photos` | Fotos (multipart, campo `image`). |
+| `PUT / DELETE` | `/api/photos/:id` | Foto. |
+| `GET / POST` | `/api/occurrence-params` | Opções dos campos (alteração: ADMIN/ENGENHEIRO). |
+| `PUT / DELETE` | `/api/occurrence-params/:id` | Opção (ADMIN/ENGENHEIRO). |
+| `POST` | `/api/occurrence-params/reset` | Restaurar opções padrão (ADMIN/ENGENHEIRO). |
+| `GET / POST` | `/api/occurrences` | Ocorrências (fotos em base64 no campo `photos`). |
+| `PUT / DELETE` | `/api/occurrences/:id` | Ocorrência. |
+| `GET` | `/api/occurrences/:id/history` | Histórico de status. |
+| `POST` | `/api/occurrences/:id/photos` | Anexar fotos (base64 JPG/PNG/WEBP/GIF, até 10 MB cada). |
+| `PUT / DELETE` | `/api/occurrence-photos/:photoId` | Legenda/fase ou remoção da foto. |
+| `GET` | `/api/rdo` | RDOs (`projectId`, `month`, `year`, `date`, `fromDate`, `toDate`, `order`). |
+| `GET` | `/api/rdo/by-date` | RDO do dia ou rascunho sugerido. |
+| `POST` | `/api/rdo` | Criar/atualizar RDO; finalizar (`status: final`) ou reabrir (`status: draft` + `reopened_reason`). |
+| `GET` | `/api/rdo/:id/history` | Histórico do RDO. |
+| `POST` | `/api/rdo/batch` | Geração em lote. |
+| `GET` | `/api/rdo/photo-dates` | Datas com fotos e RDOs existentes. |
+| `POST` | `/api/rdo/sync-services` | Serviços sugeridos pelas fotos do dia. |
+| `DELETE` | `/api/rdo/:id` | Excluir RDO em rascunho (ADMIN/ENGENHEIRO). |
+| `GET / POST` | `/api/pluviometry` | Pluviometria. |
+| `PUT / DELETE` | `/api/pluviometry/:id` | Registro pluviométrico. |
+| `POST` | `/api/pluviometry/batch` | Importação em lote (INMET). |
+
+Códigos de erro usuais: `400` dados inválidos, `401` sessão inválida/expirada, `403` sem permissão, `404` não encontrado, `409` RDO finalizado, `429` excesso de tentativas.
 
 ---
 
-## 8. Infraestrutura, Deploy no Coolify e Persistência de Dados
+## 8. Infraestrutura, Deploy e Variáveis de Ambiente
 
-### Configuração no Coolify
-- **Build Strategy**: `Dockerfile` (na raiz `/Dockerfile`)
-- **Porta Exposta**: `3001`
-- **Healthcheck**: `http://127.0.0.1:3001/api/health`
+### Coolify
+- **Build:** `Dockerfile` na raiz. **Porta:** `3001`. **Healthcheck:** `/api/health`.
+- **Volumes persistentes obrigatórios:** `/app/backend/data` (banco e segredo das sessões) e `/app/backend/uploads` (fotos).
+- **Variáveis de ambiente:** cadastre em *Environment Variables* (veja `.env.example`).
 
-### Volumes Persistentes Obrigatórios
-Para garantir que novos deploys não apaguem os dados cadastrados em produção, o container no Coolify utiliza dois mapeamentos em **Persistent Storage**:
-1. `/app/backend/data` → Armazena o arquivo `axis_obra.db` (SQLite).
-2. `/app/backend/uploads` → Armazena todas as fotografias enviadas pelos usuários.
+### Variáveis
 
-### Como Atualizar o Sistema no Futuro
-Sempre que qualquer alteração de código for enviada para a branch `main` do repositório `cesarsecco-gif/axis-obra` no GitHub:
-1. O Coolify detecta o novo commit (ou você pode clicar em **Redeploy** no painel do Coolify).
-2. O Coolify reconstrói a imagem com o novo código, preservando intactos os volumes `/app/backend/data` e `/app/backend/uploads`.
+| Variável | Obrigatória | Descrição |
+| :--- | :--- | :--- |
+| `PORT` | não | Porta HTTP (padrão `3001`). |
+| `NODE_ENV` | sim em produção | `production`. |
+| `TOKEN_SECRET` | recomendada | Segredo das sessões. Sem ela, é gerado e salvo em `backend/data/.token_secret`. |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | para login por código e recuperação | Servidor de e-mail. Sem `SMTP_HOST` em produção, essas opções ficam ocultas. |
+| `ADMIN_EMAIL`, `ADMIN_NAME`, `ADMIN_INITIAL_PASSWORD` | não | Administrador principal. |
+| `CORS_ORIGIN` | não | Domínios autorizados se o frontend estiver em outro domínio. |
+| `DATA_DIR`, `UPLOADS_DIR`, `DB_PATH` | não | Caminhos alternativos de dados. |
+
+### Atualização
+Cada commit na `main` pode ser publicado pelo Coolify (*Redeploy*) preservando os volumes. Em VPS com PM2, use `./deploy.sh`.
+
+### Backup
+Em *Configurações*, o Administrador baixa o banco completo (`.db`). As fotos ficam no volume `/app/backend/uploads` e devem ser copiadas pelo servidor.
 
 ---
 
-## 9. Credenciais Padrão e Contas de Demonstração
+## 9. Testes Automatizados
 
-Na primeira inicialização do banco de dados, o sistema cria automaticamente 4 usuários de demonstração (todos com a senha padrão **`123456`**):
+```bash
+npm test     # na raiz (executa backend/test/api.test.js)
+```
 
-| Nome | E-mail | Perfil | Obras Vinculadas |
-| :--- | :--- | :--- | :--- |
-| **Carlos Eduardo Mendes** | `admin@axisobra.com.br` | `ADMIN` | Todas as Obras (`OBR-2026-001`, `002` e `003`) |
-| **Eng. Mariana Costa** | `mariana@axisobra.com.br` | `ENGENHEIRO` | `OBR-2026-001` (Horizon) e `OBR-2026-003` (Clínica) |
-| **Eng. Roberto Almeida** | `roberto@axisobra.com.br` | `ENGENHEIRO` | `OBR-2026-002` (Centro Logístico Campinas) |
-| **João Batista Silva** | `joao@axisobra.com.br` | `ENCARREGADO` | `OBR-2026-001` (Residencial Horizon Towers) |
-
+Os testes sobem o servidor com um banco temporário e verificam: login por senha e por código, recuperação e troca de senha, bloqueio dos acessos antigos sem senha, permissões por perfil e por obra, simulação de acesso, bloqueio e histórico do RDO finalizado, numeração de folha, recusa de uploads inválidos, restauração dos campos de ocorrência e backup.

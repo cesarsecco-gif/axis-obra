@@ -15,6 +15,7 @@ import {
   Briefcase
 } from 'lucide-react';
 import { apiRequest, formatCurrency, formatDateBR } from '../api';
+import EditUserModal from './EditUserModal';
 
 const PROJECT_STATUSES = {
   PLANEJAMENTO: { label: 'Em Planejamento', badge: 'bg-sky-100 text-sky-800 border-sky-300' },
@@ -43,6 +44,7 @@ export default function ProjectsUsersView({
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [editingProject, setEditingProject] = useState(null);
   const [showUserModal, setShowUserModal] = useState(false);
+  const [editingUser, setEditingUser] = useState(null);
   const [error, setError] = useState('');
 
   const isAdmin = currentUser?.role === 'ADMIN';
@@ -69,7 +71,7 @@ export default function ProjectsUsersView({
   const initialUserForm = {
     name: '',
     email: '',
-    password: '123456',
+    password: '',
     role: 'ENGENHEIRO',
     crea_cft: '',
     phone: '',
@@ -82,9 +84,10 @@ export default function ProjectsUsersView({
   const loadData = async () => {
     setLoading(true);
     try {
+      // A lista completa de usuários é restrita ao Administrador
       const [projData, usersData] = await Promise.all([
         apiRequest('/api/projects'),
-        apiRequest('/api/users')
+        isAdmin ? apiRequest('/api/users') : Promise.resolve([currentUser])
       ]);
       setProjects(projData);
       setUsers(usersData);
@@ -431,7 +434,14 @@ export default function ProjectsUsersView({
                     <tr key={u.id} className={isCurrent ? 'bg-amber-50/40' : 'hover:bg-slate-50'}>
                       <td className="py-4 px-4">
                         <div className="flex items-center gap-2">
-                          <span className="font-bold text-slate-900">{u.name}</span>
+                          <span className={`font-bold ${u.active === 0 ? 'text-slate-400 line-through' : 'text-slate-900'}`}>
+                            {u.name}
+                          </span>
+                          {u.active === 0 && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-700">
+                              INATIVO
+                            </span>
+                          )}
                           {isCurrent && (
                             <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500 text-slate-950">
                               VOCÊ
@@ -493,12 +503,21 @@ export default function ProjectsUsersView({
                         )}
                       </td>
 
-                      <td className="py-4 px-4 text-right">
-                        {!isCurrent && onSwitchUser && (
+                      <td className="py-4 px-4 text-right space-y-1.5">
+                        {isAdmin && (
+                          <button
+                            onClick={() => setEditingUser(u)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-100 text-slate-700 text-xs font-semibold transition mr-1.5"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                            Editar
+                          </button>
+                        )}
+                        {!isCurrent && isAdmin && onSwitchUser && u.active !== 0 && (
                           <button
                             onClick={() => onSwitchUser(u.id)}
                             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-amber-500 text-white hover:text-slate-950 text-xs font-semibold transition"
-                            title="Alternar sessão para visualizar o sistema com as permissões deste usuário"
+                            title="Visualizar o sistema com as permissões deste usuário (você pode voltar a qualquer momento)"
                           >
                             <LogIn className="w-3.5 h-3.5" />
                             Simular Acesso
@@ -812,6 +831,21 @@ export default function ProjectsUsersView({
                     className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
                   />
                 </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Senha inicial (opcional)</label>
+                  <input
+                    type="password"
+                    minLength={6}
+                    autoComplete="new-password"
+                    placeholder="Mínimo 6 caracteres"
+                    value={userForm.password}
+                    onChange={(e) => setUserForm({ ...userForm, password: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
+                  />
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Se ficar em branco, o usuário entra com código por e-mail ou cria a senha em "Esqueci minha senha".
+                  </p>
+                </div>
               </div>
 
               {userForm.role !== 'ADMIN' && (
@@ -865,6 +899,15 @@ export default function ProjectsUsersView({
             </form>
           </div>
         </div>
+      )}
+
+      {editingUser && (
+        <EditUserModal
+          user={editingUser}
+          isSelf={editingUser.id === currentUser?.id}
+          onClose={() => setEditingUser(null)}
+          onSaved={() => loadData()}
+        />
       )}
     </div>
   );

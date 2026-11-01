@@ -4,48 +4,108 @@ const path = require('node:path');
 const fs = require('node:fs');
 const crypto = require('node:crypto');
 const multer = require('multer');
-const { db, initDatabase, hashPassword, uploadsDir } = require('./db');
+const {
+  db,
+  initDatabase,
+  hashPassword,
+  verifyPassword,
+  isLegacyHash,
+  seedOccurrenceParamsIfEmpty,
+  dataDir,
+  uploadsDir
+} = require('./db');
+const mailer = require('./mailer');
 
 initDatabase();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
-app.use(cors());
+app.disable('x-powered-by');
+app.set('trust proxy', true);
+
+// CORS só é necessário quando o frontend roda em outro domínio. Configure CORS_ORIGIN (lista separada por vírgula).
+if (process.env.CORS_ORIGIN) {
+  app.use(cors({ origin: process.env.CORS_ORIGIN.split(',').map((o) => o.trim()) }));
+}
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
-app.use('/uploads', express.static(uploadsDir));
 
-// Configure Multer for file uploads
+// Arquivos enviados: nunca executam scripts (protege contra SVG/HTML malicioso aberto diretamente).
+app.use(
+  '/uploads',
+  (_req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox");
+    next();
+  },
+  express.static(uploadsDir)
+);
+
+// Upload de imagens via multipart (Multer) — somente formatos de imagem.
+const ALLOWED_UPLOAD_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml'];
+const MIME_EXT = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif', 'image/svg+xml': '.svg' };
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, uploadsDir),
   filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname) || '.jpg';
+    const ext = MIME_EXT[file.mimetype] || '.jpg';
     const safeName = `foto-${Date.now()}-${crypto.randomBytes(4).toString('hex')}${ext}`;
     cb(null, safeName);
   }
 });
-const upload = multer({ storage, limits: { fileSize: 15 * 1024 * 1024 } });
+const upload = multer({
+  storage,
+  limits: { fileSize: 15 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (ALLOWED_UPLOAD_MIME.includes(file.mimetype)) return cb(null, true);
+    const err = new Error('Formato de arquivo não permitido. Envie uma imagem JPG, PNG, WEBP ou GIF.');
+    err.status = 400;
+    cb(err);
+  }
+});
 
-// Token signing & verification (HMAC SHA-256)
-const TOKEN_SECRET = process.env.TOKEN_SECRET || 'axis_obra_secret_key_2026';
+// ============================================================================
+// TOKENS DE SESSÃO (HMAC SHA-256)
+// ============================================================================
+function loadTokenSecret() {
+  if (process.env.TOKEN_SECRET) return process.env.TOKEN_SECRET;
+  // Sem variável de ambiente: gera um segredo aleatório e guarda junto ao banco (volume persistente).
+  const secretFile = path.join(dataDir, '.token_secret');
+  try {
+    if (fs.existsSync(secretFile)) {
+      const saved = fs.readFileSync(secretFile, 'utf-8').trim();
+      if (saved.length >= 32) return saved;
+    }
+    const generated = crypto.randomBytes(48).toString('hex');
+    fs.writeFileSync(secretFile, generated, { mode: 0o600 });
+    return generated;
+  } catch (err) {
+    console.warn('Não foi possível persistir TOKEN_SECRET; sessões serão invalidadas ao reiniciar.', err.message);
+    return crypto.randomBytes(48).toString('hex');
+  }
+}
+const TOKEN_SECRET = loadTokenSecret();
+const TOKEN_TTL_MS = 7 * 24 * 3600 * 1000;
 
-function createToken(user) {
+function createToken(user, extra = {}) {
   const payload = Buffer.from(
-    JSON.stringify({ id: user.id, email: user.email, role: user.role, exp: Date.now() + 7 * 24 * 3600 * 1000 })
+    JSON.stringify({ id: user.id, email: user.email, role: user.role, exp: Date.now() + TOKEN_TTL_MS, ...extra })
   ).toString('base64url');
   const sig = crypto.createHmac('sha256', TOKEN_SECRET).update(payload).digest('base64url');
   return `${payload}.${sig}`;
 }
 
 function verifyToken(token) {
-  if (!token || !token.includes('.')) return null;
+  if (!token || typeof token !== 'string' || !token.includes('.')) return null;
   const [payload, sig] = token.split('.');
   const expectedSig = crypto.createHmac('sha256', TOKEN_SECRET).update(payload).digest('base64url');
-  if (sig !== expectedSig) return null;
+  const a = Buffer.from(sig || '');
+  const b = Buffer.from(expectedSig);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
   try {
     const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf-8'));
-    if (data.exp && data.exp < Date.now()) return null;
+    if (!data.exp || data.exp < Date.now()) return null;
     return data;
   } catch {
     return null;
@@ -71,39 +131,88 @@ function canUserAccessProject(user, projectId) {
   return ids.includes(Number(projectId));
 }
 
-// Auth middleware
+const USER_PUBLIC_FIELDS = 'id, name, email, role, crea_cft, phone, active, created_at';
+
+// Auth middleware — aceita somente token Bearer assinado.
 function authenticate(req, res, next) {
   const authHeader = req.headers.authorization;
-  let userId = null;
+  const decoded = authHeader && authHeader.startsWith('Bearer ') ? verifyToken(authHeader.slice(7)) : null;
 
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    const decoded = verifyToken(authHeader.slice(7));
-    if (decoded) userId = decoded.id;
+  if (!decoded) {
+    return res.status(401).json({ error: 'Sessão expirada ou inválida. Faça login novamente.' });
   }
 
-  if (!userId && req.headers['x-user-id']) {
-    userId = Number(req.headers['x-user-id']);
-  }
-
-  if (!userId) {
-    return res.status(401).json({ error: 'Não autenticado. Faça login novamente.' });
-  }
-
-  const user = db
-    .prepare('SELECT id, name, email, role, crea_cft, phone, active, created_at FROM users WHERE id = ?')
-    .get(userId);
+  const user = db.prepare(`SELECT ${USER_PUBLIC_FIELDS} FROM users WHERE id = ?`).get(decoded.id);
 
   if (!user || !user.active) {
     return res.status(401).json({ error: 'Usuário inválido ou inativo.' });
   }
 
   req.user = user;
+  req.impersonatorId = decoded.impersonatorId || null;
   req.accessibleProjectIds = getUserAccessibleProjectIds(user);
+
+  // Perfil FISCAL é somente leitura (pode apenas alterar a própria senha).
+  if (user.role === 'FISCAL' && req.method !== 'GET' && !req.originalUrl.startsWith('/api/auth/')) {
+    return res.status(403).json({ error: 'O perfil Fiscal possui acesso somente para consulta.' });
+  }
+
   next();
 }
 
+function requireRoles(...roles) {
+  return (req, res, next) => {
+    if (!roles.includes(req.user.role)) {
+      return res.status(403).json({ error: 'Seu perfil não tem permissão para esta ação.' });
+    }
+    next();
+  };
+}
+
+function buildSessionResponse(user, extra = {}) {
+  const { password_hash, ...safeUser } = user;
+  return {
+    token: createToken(safeUser, extra),
+    user: { ...safeUser, accessibleProjectIds: getUserAccessibleProjectIds(safeUser) },
+    impersonatorId: extra.impersonatorId || null
+  };
+}
+
 // ============================================================================
-// 0. AUTHENTICATION & DEMO ACCOUNTS
+// LIMITE DE TENTATIVAS (em memória)
+// ============================================================================
+const rateBuckets = new Map();
+function rateLimit(key, max, windowMs) {
+  const now = Date.now();
+  const bucket = rateBuckets.get(key);
+  if (!bucket || bucket.resetAt < now) {
+    rateBuckets.set(key, { count: 1, resetAt: now + windowMs });
+    return true;
+  }
+  bucket.count += 1;
+  return bucket.count <= max;
+}
+// Conta apenas falhas (ex.: senha errada) — sem consumir o limite em logins bem-sucedidos.
+function isBlocked(key, max) {
+  const bucket = rateBuckets.get(key);
+  return Boolean(bucket && bucket.resetAt >= Date.now() && bucket.count >= max);
+}
+function registerFailure(key, windowMs) {
+  const now = Date.now();
+  const bucket = rateBuckets.get(key);
+  if (!bucket || bucket.resetAt < now) rateBuckets.set(key, { count: 1, resetAt: now + windowMs });
+  else bucket.count += 1;
+}
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of rateBuckets) if (v.resetAt < now) rateBuckets.delete(k);
+}, 10 * 60 * 1000).unref();
+
+const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
+const PASSWORD_MIN = 6;
+
+// ============================================================================
+// 0. AUTENTICAÇÃO
 // ============================================================================
 
 // Healthcheck endpoint for Coolify / Docker
@@ -111,62 +220,147 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', service: 'axis-obra', timestamp: new Date().toISOString() });
 });
 
-app.get('/api/auth/demo-users', (_req, res) => {
-  const users = db
-    .prepare('SELECT id, name, email, role, crea_cft, phone FROM users WHERE active = 1 ORDER BY id ASC')
-    .all();
-
-  const enriched = users.map((u) => {
-    const projects =
-      u.role === 'ADMIN'
-        ? db.prepare('SELECT id, code, name FROM projects ORDER BY id ASC').all()
-        : db
-            .prepare(`
-              SELECT p.id, p.code, p.name, pu.role_in_project
-              FROM projects p
-              JOIN project_users pu ON pu.project_id = p.id
-              WHERE pu.user_id = ?
-              ORDER BY p.id ASC
-            `)
-            .all(u.id);
-    return { ...u, projects };
-  });
-
-  res.json(enriched);
+// Opções exibidas na tela de login
+app.get('/api/auth/options', (_req, res) => {
+  res.json({ emailCodeEnabled: mailer.emailAvailable });
 });
 
 app.post('/api/auth/login', (req, res) => {
-  const { email, password, userId } = req.body;
-
-  let user;
-  if (userId) {
-    // Quick profile switch for demo convenience
-    user = db.prepare('SELECT * FROM users WHERE id = ? AND active = 1').get(Number(userId));
-  } else {
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Informe e-mail e senha.' });
-    }
-    const hashed = hashPassword(password);
-    user = db
-      .prepare('SELECT * FROM users WHERE LOWER(email) = LOWER(?) AND password_hash = ? AND active = 1')
-      .get(email.trim(), hashed);
+  const { email, password } = req.body || {};
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Informe e-mail e senha.' });
+  }
+  const normEmail = normalizeEmail(email);
+  const ipKey = `login-fail:${req.ip}`;
+  const emailKey = `login-fail:${normEmail}`;
+  if (isBlocked(ipKey, 30) || isBlocked(emailKey, 8)) {
+    return res.status(429).json({ error: 'Muitas tentativas de login sem sucesso. Aguarde 15 minutos e tente novamente.' });
   }
 
-  if (!user) {
-    return res.status(401).json({ error: 'Credenciais inválidas ou usuário inativo.' });
+  const user = db.prepare('SELECT * FROM users WHERE LOWER(email) = ? AND active = 1').get(normEmail);
+  if (!user || !verifyPassword(password, user.password_hash)) {
+    registerFailure(ipKey, 15 * 60 * 1000);
+    registerFailure(emailKey, 15 * 60 * 1000);
+    return res.status(401).json({ error: 'E-mail ou senha inválidos.' });
   }
 
-  const token = createToken(user);
-  const { password_hash, ...safeUser } = user;
-  const accessibleProjectIds = getUserAccessibleProjectIds(safeUser);
+  // Migra hash antigo para scrypt de forma transparente
+  if (isLegacyHash(user.password_hash)) {
+    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(password), user.id);
+  }
 
-  res.json({
-    token,
-    user: {
-      ...safeUser,
-      accessibleProjectIds
-    }
-  });
+  res.json(buildSessionResponse(user));
+});
+
+// --- Códigos por e-mail (login sem senha e recuperação de senha) ---
+const CODE_TTL_MINUTES = 10;
+const CODE_MAX_ATTEMPTS = 5;
+const hashCode = (code) => crypto.createHmac('sha256', TOKEN_SECRET).update(String(code)).digest('hex');
+
+app.post('/api/auth/request-code', async (req, res) => {
+  const { email, purpose } = req.body || {};
+  const normEmail = normalizeEmail(email);
+  const finalPurpose = purpose === 'RESET' ? 'RESET' : 'LOGIN';
+  if (!normEmail) return res.status(400).json({ error: 'Informe o e-mail cadastrado.' });
+
+  if (!mailer.emailAvailable) {
+    return res.status(503).json({ error: 'O envio de códigos por e-mail não está configurado no servidor.' });
+  }
+  if (!rateLimit(`code-ip:${req.ip}`, 10, 15 * 60 * 1000) || !rateLimit(`code:${normEmail}`, 3, 10 * 60 * 1000)) {
+    return res.status(429).json({ error: 'Muitas solicitações de código. Aguarde alguns minutos.' });
+  }
+
+  // Resposta é sempre a mesma, exista ou não o e-mail (não revela usuários cadastrados).
+  const genericResponse = {
+    success: true,
+    message: 'Se o e-mail estiver cadastrado e ativo, você receberá um código em instantes.'
+  };
+
+  const user = db.prepare('SELECT id, name, email FROM users WHERE LOWER(email) = ? AND active = 1').get(normEmail);
+  if (!user) return res.json(genericResponse);
+
+  const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+  const now = Date.now();
+  // Invalida códigos anteriores do mesmo tipo
+  db.prepare('UPDATE auth_codes SET used_at = ? WHERE user_id = ? AND purpose = ? AND used_at IS NULL').run(
+    now,
+    user.id,
+    finalPurpose
+  );
+  db.prepare(
+    'INSERT INTO auth_codes (user_id, purpose, code_hash, expires_at, created_at) VALUES (?, ?, ?, ?, ?)'
+  ).run(user.id, finalPurpose, hashCode(code), now + CODE_TTL_MINUTES * 60 * 1000, now);
+
+  try {
+    await mailer.sendAuthCode({
+      to: user.email,
+      name: user.name,
+      code,
+      purpose: finalPurpose,
+      minutes: CODE_TTL_MINUTES
+    });
+  } catch (err) {
+    console.error('Falha ao enviar e-mail de código:', err.message);
+    return res.status(502).json({ error: 'Não foi possível enviar o e-mail agora. Tente novamente mais tarde.' });
+  }
+
+  res.json(genericResponse);
+});
+
+// Valida e consome um código. Retorna o usuário ou um objeto de erro.
+function consumeAuthCode(email, code, purpose) {
+  const normEmail = normalizeEmail(email);
+  const user = db.prepare('SELECT * FROM users WHERE LOWER(email) = ? AND active = 1').get(normEmail);
+  const invalid = { error: 'Código inválido ou expirado. Solicite um novo código.' };
+  if (!user || !code) return invalid;
+
+  const row = db
+    .prepare(
+      'SELECT * FROM auth_codes WHERE user_id = ? AND purpose = ? AND used_at IS NULL ORDER BY id DESC LIMIT 1'
+    )
+    .get(user.id, purpose);
+  if (!row || row.expires_at < Date.now() || row.attempts >= CODE_MAX_ATTEMPTS) return invalid;
+
+  const a = Buffer.from(hashCode(String(code).trim()));
+  const b = Buffer.from(row.code_hash);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+    db.prepare('UPDATE auth_codes SET attempts = attempts + 1 WHERE id = ?').run(row.id);
+    return invalid;
+  }
+
+  db.prepare('UPDATE auth_codes SET used_at = ? WHERE id = ?').run(Date.now(), row.id);
+  return { user };
+}
+
+app.post('/api/auth/login-code', (req, res) => {
+  const { email, code } = req.body || {};
+  if (isBlocked(`verify-fail:${req.ip}`, 30)) {
+    return res.status(429).json({ error: 'Muitas tentativas. Aguarde alguns minutos.' });
+  }
+  const result = consumeAuthCode(email, code, 'LOGIN');
+  if (result.error) {
+    registerFailure(`verify-fail:${req.ip}`, 15 * 60 * 1000);
+    return res.status(401).json({ error: result.error });
+  }
+  res.json(buildSessionResponse(result.user));
+});
+
+app.post('/api/auth/reset-password', (req, res) => {
+  const { email, code, newPassword } = req.body || {};
+  if (!newPassword || String(newPassword).length < PASSWORD_MIN) {
+    return res.status(400).json({ error: `A nova senha deve ter pelo menos ${PASSWORD_MIN} caracteres.` });
+  }
+  if (isBlocked(`verify-fail:${req.ip}`, 30)) {
+    return res.status(429).json({ error: 'Muitas tentativas. Aguarde alguns minutos.' });
+  }
+  const result = consumeAuthCode(email, code, 'RESET');
+  if (result.error) {
+    registerFailure(`verify-fail:${req.ip}`, 15 * 60 * 1000);
+    return res.status(401).json({ error: result.error });
+  }
+
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(newPassword), result.user.id);
+  res.json({ success: true, message: 'Senha alterada com sucesso. Faça login com a nova senha.' });
 });
 
 app.get('/api/auth/me', authenticate, (req, res) => {
@@ -174,8 +368,59 @@ app.get('/api/auth/me', authenticate, (req, res) => {
     user: {
       ...req.user,
       accessibleProjectIds: req.accessibleProjectIds
-    }
+    },
+    impersonatorId: req.impersonatorId
   });
+});
+
+// Alterar a própria senha
+app.put('/api/auth/password', authenticate, (req, res) => {
+  const { currentPassword, newPassword } = req.body || {};
+  if (req.impersonatorId) {
+    return res.status(403).json({ error: 'Não é possível alterar senha durante a simulação de acesso.' });
+  }
+  if (!newPassword || String(newPassword).length < PASSWORD_MIN) {
+    return res.status(400).json({ error: `A nova senha deve ter pelo menos ${PASSWORD_MIN} caracteres.` });
+  }
+  const row = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(req.user.id);
+  if (!verifyPassword(currentPassword || '', row.password_hash)) {
+    return res.status(400).json({ error: 'Senha atual incorreta.' });
+  }
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(newPassword), req.user.id);
+  res.json({ success: true });
+});
+
+// Simular acesso de outro usuário (somente ADMIN). O token guarda quem iniciou a simulação.
+app.post('/api/auth/impersonate', authenticate, (req, res) => {
+  if (req.user.role !== 'ADMIN' || req.impersonatorId) {
+    return res.status(403).json({ error: 'Apenas Administradores podem simular o acesso de outro usuário.' });
+  }
+  const target = db.prepare('SELECT * FROM users WHERE id = ? AND active = 1').get(Number(req.body?.userId));
+  if (!target) return res.status(404).json({ error: 'Usuário não encontrado ou inativo.' });
+  res.json(buildSessionResponse(target, { impersonatorId: req.user.id }));
+});
+
+// Encerrar simulação e voltar ao administrador
+app.post('/api/auth/stop-impersonation', authenticate, (req, res) => {
+  if (!req.impersonatorId) return res.status(400).json({ error: 'Nenhuma simulação ativa.' });
+  const admin = db.prepare("SELECT * FROM users WHERE id = ? AND active = 1 AND role = 'ADMIN'").get(req.impersonatorId);
+  if (!admin) return res.status(401).json({ error: 'Administrador original inválido. Faça login novamente.' });
+  res.json(buildSessionResponse(admin));
+});
+
+// Backup do banco de dados (somente ADMIN)
+app.get('/api/admin/backup', authenticate, requireRoles('ADMIN'), (_req, res) => {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const tmpFile = path.join(dataDir, `backup-${stamp}-${crypto.randomBytes(3).toString('hex')}.db`);
+  try {
+    db.exec(`VACUUM INTO '${tmpFile.replace(/'/g, "''")}'`);
+    res.download(tmpFile, `axis_obra_backup_${stamp}.db`, () => {
+      fs.unlink(tmpFile, () => {});
+    });
+  } catch (err) {
+    fs.unlink(tmpFile, () => {});
+    res.status(500).json({ error: `Falha ao gerar backup: ${err.message}` });
+  }
 });
 
 // ============================================================================
@@ -534,7 +779,7 @@ app.delete('/api/projects/:id/users/:userId', authenticate, (req, res) => {
 });
 
 // Users CRUD (for managing users & assigning projects)
-app.get('/api/users', authenticate, (_req, res) => {
+app.get('/api/users', authenticate, requireRoles('ADMIN'), (_req, res) => {
   const users = db
     .prepare('SELECT id, name, email, role, crea_cft, phone, active, created_at FROM users ORDER BY id ASC')
     .all();
@@ -564,6 +809,12 @@ app.post('/api/users', authenticate, (req, res) => {
   if (!name || !email) {
     return res.status(400).json({ error: 'Nome e e-mail são obrigatórios.' });
   }
+  if (!VALID_ROLES.includes(role || 'ENGENHEIRO')) {
+    return res.status(400).json({ error: 'Perfil inválido.' });
+  }
+  if (password && String(password).length < PASSWORD_MIN) {
+    return res.status(400).json({ error: `A senha deve ter pelo menos ${PASSWORD_MIN} caracteres.` });
+  }
 
   try {
     const info = db
@@ -574,7 +825,8 @@ app.post('/api/users', authenticate, (req, res) => {
       .run(
         name.trim(),
         email.trim().toLowerCase(),
-        hashPassword(password || '123456'),
+        // Sem senha informada: senha aleatória; o usuário entra por código no e-mail ou usa "Esqueci minha senha".
+        hashPassword(password || crypto.randomBytes(18).toString('base64url')),
         role || 'ENGENHEIRO',
         crea_cft || '',
         phone || ''
@@ -597,6 +849,57 @@ app.post('/api/users', authenticate, (req, res) => {
   } catch (err) {
     res.status(400).json({ error: err.message.includes('UNIQUE') ? 'E-mail já cadastrado.' : err.message });
   }
+});
+
+const VALID_ROLES = ['ADMIN', 'ENGENHEIRO', 'ENCARREGADO', 'FISCAL'];
+
+// Editar dados de um usuário (inclui ativar/desativar)
+app.put('/api/users/:id', authenticate, requireRoles('ADMIN'), (req, res) => {
+  const targetId = Number(req.params.id);
+  const existing = db.prepare('SELECT * FROM users WHERE id = ?').get(targetId);
+  if (!existing) return res.status(404).json({ error: 'Usuário não encontrado.' });
+
+  const { name, email, role, crea_cft, phone, active } = req.body;
+  const newRole = role || existing.role;
+  const newActive = active !== undefined ? (active ? 1 : 0) : existing.active;
+  if (!VALID_ROLES.includes(newRole)) return res.status(400).json({ error: 'Perfil inválido.' });
+
+  if (targetId === req.user.id && (newRole !== 'ADMIN' || !newActive)) {
+    return res.status(400).json({ error: 'Você não pode remover seu próprio perfil de Administrador nem se desativar.' });
+  }
+  if (existing.role === 'ADMIN' && (newRole !== 'ADMIN' || !newActive)) {
+    const otherAdmins = db
+      .prepare("SELECT COUNT(*) as c FROM users WHERE role = 'ADMIN' AND active = 1 AND id != ?")
+      .get(targetId).c;
+    if (otherAdmins === 0) return res.status(400).json({ error: 'O sistema precisa ter pelo menos um Administrador ativo.' });
+  }
+
+  try {
+    db.prepare('UPDATE users SET name = ?, email = ?, role = ?, crea_cft = ?, phone = ?, active = ? WHERE id = ?').run(
+      name !== undefined ? String(name).trim() : existing.name,
+      email !== undefined ? normalizeEmail(email) : existing.email,
+      newRole,
+      crea_cft !== undefined ? crea_cft : existing.crea_cft,
+      phone !== undefined ? phone : existing.phone,
+      newActive,
+      targetId
+    );
+  } catch (err) {
+    return res.status(400).json({ error: err.message.includes('UNIQUE') ? 'E-mail já cadastrado.' : err.message });
+  }
+  res.json(db.prepare(`SELECT ${USER_PUBLIC_FIELDS} FROM users WHERE id = ?`).get(targetId));
+});
+
+// Definir nova senha para um usuário (ADMIN)
+app.put('/api/users/:id/password', authenticate, requireRoles('ADMIN'), (req, res) => {
+  const targetId = Number(req.params.id);
+  const { newPassword } = req.body;
+  if (!newPassword || String(newPassword).length < PASSWORD_MIN) {
+    return res.status(400).json({ error: `A nova senha deve ter pelo menos ${PASSWORD_MIN} caracteres.` });
+  }
+  const info = db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(newPassword), targetId);
+  if (!info.changes) return res.status(404).json({ error: 'Usuário não encontrado.' });
+  res.json({ success: true });
 });
 
 app.put('/api/users/:id/projects', authenticate, (req, res) => {
@@ -950,7 +1253,7 @@ app.get('/api/report-settings', authenticate, (_req, res) => {
   res.json(row || {});
 });
 
-app.put('/api/report-settings', authenticate, upload.single('banner_file'), (req, res) => {
+app.put('/api/report-settings', authenticate, requireRoles('ADMIN', 'ENGENHEIRO'), upload.single('banner_file'), (req, res) => {
   const existing = db.prepare('SELECT * FROM report_settings WHERE id = 1').get();
   const {
     orientation,
@@ -989,16 +1292,9 @@ app.put('/api/report-settings', authenticate, upload.single('banner_file'), (req
   if (req.file) {
     finalBannerUrl = `/uploads/${req.file.filename}`;
   } else if (banner_image_base64 && banner_image_base64.startsWith('data:image/')) {
-    const matches = banner_image_base64.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/);
-    if (matches) {
-      let ext = matches[1].toLowerCase();
-      if (ext === 'jpeg') ext = 'jpg';
-      if (ext === 'svg+xml') ext = 'svg';
-      const filename = `banner-relatorio-${Date.now()}.${ext}`;
-      const filePath = path.join(uploadsDir, filename);
-      fs.writeFileSync(filePath, Buffer.from(matches[2], 'base64'));
-      finalBannerUrl = `/uploads/${filename}`;
-    }
+    const saved = saveBase64Image(banner_image_base64, 'banner-relatorio');
+    if (!saved) return res.status(400).json({ error: 'Imagem do banner inválida. Use JPG, PNG, WEBP ou GIF de até 10 MB.' });
+    finalBannerUrl = saved;
   }
 
   db.prepare(`
@@ -1276,7 +1572,7 @@ app.get('/api/occurrence-params', authenticate, (req, res) => {
   res.json(rows);
 });
 
-app.post('/api/occurrence-params', authenticate, (req, res) => {
+app.post('/api/occurrence-params', authenticate, requireRoles('ADMIN', 'ENGENHEIRO'), (req, res) => {
   const { group_key, code, label, color, is_resolved, is_critical, sort_order } = req.body;
   if (!group_key || !label || !label.trim()) {
     return res.status(400).json({ error: 'Grupo e nome da opção são obrigatórios.' });
@@ -1323,7 +1619,7 @@ app.post('/api/occurrence-params', authenticate, (req, res) => {
   res.status(201).json(created);
 });
 
-app.put('/api/occurrence-params/:id', authenticate, (req, res) => {
+app.put('/api/occurrence-params/:id', authenticate, requireRoles('ADMIN', 'ENGENHEIRO'), (req, res) => {
   const paramId = Number(req.params.id);
   const existing = db.prepare('SELECT * FROM occurrence_params WHERE id = ?').get(paramId);
   if (!existing) {
@@ -1363,7 +1659,7 @@ app.put('/api/occurrence-params/:id', authenticate, (req, res) => {
   res.json(updated);
 });
 
-app.delete('/api/occurrence-params/:id', authenticate, (req, res) => {
+app.delete('/api/occurrence-params/:id', authenticate, requireRoles('ADMIN', 'ENGENHEIRO'), (req, res) => {
   const paramId = Number(req.params.id);
   const existing = db.prepare('SELECT * FROM occurrence_params WHERE id = ?').get(paramId);
   if (!existing) {
@@ -1372,6 +1668,13 @@ app.delete('/api/occurrence-params/:id', authenticate, (req, res) => {
 
   db.prepare('DELETE FROM occurrence_params WHERE id = ?').run(paramId);
   res.json({ success: true });
+});
+
+// Restaurar opções padrão dos campos de ocorrência
+app.post('/api/occurrence-params/reset', authenticate, requireRoles('ADMIN', 'ENGENHEIRO'), (_req, res) => {
+  db.exec('DELETE FROM occurrence_params;');
+  seedOccurrenceParamsIfEmpty();
+  res.json(db.prepare('SELECT * FROM occurrence_params ORDER BY group_key ASC, sort_order ASC, id ASC').all());
 });
 
 // ---------------------------------------------------------------------------
@@ -1416,15 +1719,25 @@ const getOccurrenceFull = (occId) => {
   return attachOccurrencePhotos([row])[0];
 };
 
+// Imagens recebidas em base64: somente JPG/PNG/WEBP/GIF (sem SVG), conferindo a assinatura do arquivo.
+const MAX_BASE64_IMAGE_BYTES = 10 * 1024 * 1024;
+const IMAGE_SIGNATURES = {
+  jpg: (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
+  png: (b) => b.slice(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+  gif: (b) => b.slice(0, 4).toString('ascii') === 'GIF8',
+  webp: (b) => b.slice(0, 4).toString('ascii') === 'RIFF' && b.slice(8, 12).toString('ascii') === 'WEBP'
+};
 const saveBase64Image = (dataUrl, prefix = 'occ') => {
   if (!dataUrl || typeof dataUrl !== 'string') return null;
   const matches = dataUrl.match(/^data:image\/([a-zA-Z0-9+.-]+);base64,(.+)$/);
   if (!matches) return null;
   let ext = matches[1].toLowerCase();
   if (ext === 'jpeg') ext = 'jpg';
-  if (ext === 'svg+xml') ext = 'svg';
-  const filename = `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-  fs.writeFileSync(path.join(uploadsDir, filename), Buffer.from(matches[2], 'base64'));
+  if (!IMAGE_SIGNATURES[ext]) return null;
+  const buffer = Buffer.from(matches[2], 'base64');
+  if (!buffer.length || buffer.length > MAX_BASE64_IMAGE_BYTES || !IMAGE_SIGNATURES[ext](buffer)) return null;
+  const filename = `${prefix}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ext}`;
+  fs.writeFileSync(path.join(uploadsDir, filename), buffer);
   return `/uploads/${filename}`;
 };
 
@@ -1867,6 +2180,26 @@ app.get('/api/rdo/by-date', authenticate, (req, res) => {
   });
 });
 
+const RDO_SIGNER_ROLES = ['ADMIN', 'ENGENHEIRO'];
+const logRdoHistory = (rdoId, user, action, note) => {
+  db.prepare('INSERT INTO rdo_history (rdo_id, user_id, user_name, action, note) VALUES (?, ?, ?, ?, ?)').run(
+    rdoId,
+    user?.id || null,
+    user?.name || '',
+    action,
+    note || ''
+  );
+};
+const getRdoFull = (pid, rdoDate) =>
+  db
+    .prepare(`
+      SELECT r.*, p.name as project_name, p.code as project_code
+      FROM rdo_records r
+      JOIN projects p ON p.id = r.project_id
+      WHERE r.project_id = ? AND r.rdo_date = ?
+    `)
+    .get(pid, rdoDate);
+
 app.post('/api/rdo', authenticate, (req, res) => {
   const {
     project_id,
@@ -1903,7 +2236,39 @@ app.post('/api/rdo', authenticate, (req, res) => {
     ? services_developed
     : '[]';
 
-  const folio = Number(folio_number) || 1;
+  const existing = db.prepare('SELECT * FROM rdo_records WHERE project_id = ? AND rdo_date = ?').get(pid, rdo_date);
+  const requestedStatus = status === 'final' ? 'final' : 'draft';
+  const canSign = RDO_SIGNER_ROLES.includes(req.user.role);
+
+  // Folha finalizada: bloqueada. Só é possível reabrir (com motivo) por Engenheiro/Administrador.
+  if (existing && existing.status === 'final') {
+    if (requestedStatus === 'final') {
+      return res.status(409).json({ error: 'Esta folha está FINALIZADA e bloqueada para edição. Reabra a folha para fazer correções.' });
+    }
+    if (!canSign) {
+      return res.status(403).json({ error: 'Apenas Engenheiros e Administradores podem reabrir um RDO finalizado.' });
+    }
+    const reason = String(reopened_reason || '').trim();
+    if (!reason) return res.status(400).json({ error: 'Informe o motivo da reabertura da folha.' });
+
+    db.prepare(
+      "UPDATE rdo_records SET status = 'draft', reopened_reason = ?, finalized_at = '', updated_at = CURRENT_TIMESTAMP WHERE id = ?"
+    ).run(reason, existing.id);
+    logRdoHistory(existing.id, req.user, 'REABERTO', reason);
+    return res.json(getRdoFull(pid, rdo_date));
+  }
+
+  if (requestedStatus === 'final' && !canSign) {
+    return res.status(403).json({ error: 'Apenas Engenheiros e Administradores podem finalizar o RDO.' });
+  }
+
+  // Número da folha é sempre definido pelo servidor (sequencial por obra).
+  const folio = existing
+    ? existing.folio_number
+    : (db.prepare('SELECT MAX(folio_number) as maxF FROM rdo_records WHERE project_id = ?').get(pid)?.maxF || 0) + 1;
+  const finalSignatureValue = requestedStatus === 'final' ? final_signature || req.user.name : '';
+  const finalizedAtValue = requestedStatus === 'final' ? new Date().toISOString() : '';
+  const reopenedReasonValue = existing ? existing.reopened_reason || '' : '';
 
   db.prepare(`
     INSERT INTO rdo_records (
@@ -1945,22 +2310,25 @@ app.post('/api/rdo', authenticate, (req, res) => {
     supervisor_notes || '',
     fiscal_notes || '',
     servicesJson,
-    status || 'draft',
-    final_signature || '',
-    finalized_at || '',
-    reopened_reason || ''
+    requestedStatus,
+    finalSignatureValue,
+    finalizedAtValue,
+    reopenedReasonValue
   );
 
-  const saved = db
-    .prepare(`
-      SELECT r.*, p.name as project_name, p.code as project_code
-      FROM rdo_records r
-      JOIN projects p ON p.id = r.project_id
-      WHERE r.project_id = ? AND r.rdo_date = ?
-    `)
-    .get(pid, rdo_date);
+  const saved = getRdoFull(pid, rdo_date);
+  if (!existing) logRdoHistory(saved.id, req.user, 'CRIADO', '');
+  if (requestedStatus === 'final') logRdoHistory(saved.id, req.user, 'FINALIZADO', '');
 
   res.status(200).json(saved);
+});
+
+app.get('/api/rdo/:id/history', authenticate, (req, res) => {
+  const rdoId = Number(req.params.id);
+  const existing = db.prepare('SELECT project_id FROM rdo_records WHERE id = ?').get(rdoId);
+  if (!existing) return res.status(404).json({ error: 'RDO não encontrado.' });
+  if (!canUserAccessProject(req.user, existing.project_id)) return res.status(403).json({ error: 'Sem permissão.' });
+  res.json(db.prepare('SELECT * FROM rdo_history WHERE rdo_id = ? ORDER BY changed_at ASC, id ASC').all(rdoId));
 });
 
 // Batch generation matching Relatorio-DER-PR 1.9.1 createRdoBatch behavior
@@ -2028,57 +2396,65 @@ app.post('/api/rdo/batch', authenticate, (req, res) => {
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', CURRENT_TIMESTAMP)
   `);
 
-  for (const date of targetDates) {
-    if (existingSet.has(date)) {
-      skipped.push(date);
-      continue;
-    }
-
-    const dayPhotos = photos.filter((p) => p.taken_at === date);
-    const serviceSet = new Set();
-    dayPhotos.forEach((p) => {
-      const t = String(p.title || '').trim().replace(/\s+/g, ' ').toUpperCase();
-      if (t) serviceSet.add(t);
-    });
-    const servicesList = [...serviceSet];
-
-    const pluv = db.prepare('SELECT * FROM pluviometry WHERE project_id = ? AND record_date = ?').get(pid, date);
-    let autoWeather = defaults.weather || 'BOM';
-    if (pluv) {
-      if (pluv.work_impact === 'PARALISACAO_TOTAL' || Number(pluv.rainfall_mm) >= 30 || pluv.afternoon_weather === 'IMPRATICAVEL') {
-        autoWeather = 'IMPRATICAVEL';
-      } else if (Number(pluv.rainfall_mm) > 0 || String(pluv.morning_weather).includes('CHUVA') || String(pluv.afternoon_weather).includes('CHUVA')) {
-        autoWeather = 'CHUVOSO';
-      } else if (pluv.morning_weather === 'NUBLADO' || pluv.afternoon_weather === 'NUBLADO') {
-        autoWeather = 'INSTAVEL';
+  // Lote inteiro em uma transação: ou cria todas as folhas, ou nenhuma.
+  db.exec('BEGIN');
+  try {
+    for (const date of targetDates) {
+      if (existingSet.has(date)) {
+        skipped.push(date);
+        continue;
       }
+
+      const dayPhotos = photos.filter((p) => p.taken_at === date);
+      const serviceSet = new Set();
+      dayPhotos.forEach((p) => {
+        const t = String(p.title || '').trim().replace(/\s+/g, ' ').toUpperCase();
+        if (t) serviceSet.add(t);
+      });
+      const servicesList = [...serviceSet];
+
+      const pluv = db.prepare('SELECT * FROM pluviometry WHERE project_id = ? AND record_date = ?').get(pid, date);
+      let autoWeather = defaults.weather || 'BOM';
+      if (pluv) {
+        if (pluv.work_impact === 'PARALISACAO_TOTAL' || Number(pluv.rainfall_mm) >= 30 || pluv.afternoon_weather === 'IMPRATICAVEL') {
+          autoWeather = 'IMPRATICAVEL';
+        } else if (Number(pluv.rainfall_mm) > 0 || String(pluv.morning_weather).includes('CHUVA') || String(pluv.afternoon_weather).includes('CHUVA')) {
+          autoWeather = 'CHUVOSO';
+        } else if (pluv.morning_weather === 'NUBLADO' || pluv.afternoon_weather === 'NUBLADO') {
+          autoWeather = 'INSTAVEL';
+        }
+      }
+
+      const workForce = defaults.professionals !== null && defaults.professionals !== undefined && defaults.professionals !== ''
+        ? Number(defaults.professionals)
+        : null;
+
+      const sufficient = defaults.sufficient === 'SIM' ? 1 : defaults.sufficient === 'NAO' || defaults.sufficient === 'NÃO' ? 0 : 1;
+      const present = defaults.present === 'SIM' ? 1 : defaults.present === 'NAO' || defaults.present === 'NÃO' ? 0 : 1;
+
+      insertStmt.run(
+        pid,
+        req.user.id,
+        nextFolio++,
+        date,
+        autoWeather,
+        project?.code || settings.contract_number || '',
+        workForce !== null ? workForce : 0,
+        sufficient,
+        settings.contractor_representative || '',
+        present,
+        defaults.contractorNotes || '',
+        settings.regional_superintendency || 'DER/PR SUPERINTENDÊNCIA REGIONAL NOROESTE',
+        '',
+        JSON.stringify(servicesList)
+      );
+
+      created.push(date);
     }
-
-    const workForce = defaults.professionals !== null && defaults.professionals !== undefined && defaults.professionals !== ''
-      ? Number(defaults.professionals)
-      : null;
-
-    const sufficient = defaults.sufficient === 'SIM' ? 1 : defaults.sufficient === 'NAO' || defaults.sufficient === 'NÃO' ? 0 : 1;
-    const present = defaults.present === 'SIM' ? 1 : defaults.present === 'NAO' || defaults.present === 'NÃO' ? 0 : 1;
-
-    insertStmt.run(
-      pid,
-      req.user.id,
-      nextFolio++,
-      date,
-      autoWeather,
-      project?.code || settings.contract_number || '',
-      workForce !== null ? workForce : 0,
-      sufficient,
-      settings.contractor_representative || '',
-      present,
-      defaults.contractorNotes || '',
-      settings.supervisorNotes || settings.regional_superintendency || 'DER/PR SUPERINTENDÊNCIA REGIONAL NOROESTE',
-      settings.inspectorNotes || '',
-      JSON.stringify(servicesList)
-    );
-
-    created.push(date);
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    return res.status(500).json({ error: `Falha ao gerar o lote de RDOs: ${err.message}` });
   }
 
   res.json({ created, skipped });
@@ -2115,6 +2491,9 @@ app.post('/api/rdo/sync-services', authenticate, (req, res) => {
   }
 
   const pid = Number(project_id);
+  if (!canUserAccessProject(req.user, pid)) {
+    return res.status(403).json({ error: 'Sem permissão nesta obra.' });
+  }
   const photos = db
     .prepare('SELECT title, description FROM photos WHERE project_id = ? AND taken_at = ? ORDER BY id ASC')
     .all(pid, rdo_date);
@@ -2135,6 +2514,12 @@ app.delete('/api/rdo/:id', authenticate, (req, res) => {
 
   if (!canUserAccessProject(req.user, existing.project_id)) {
     return res.status(403).json({ error: 'Sem permissão.' });
+  }
+  if (!RDO_SIGNER_ROLES.includes(req.user.role)) {
+    return res.status(403).json({ error: 'Apenas Engenheiros e Administradores podem excluir um RDO.' });
+  }
+  if (existing.status === 'final') {
+    return res.status(409).json({ error: 'Folha FINALIZADA não pode ser excluída. Reabra a folha antes de excluir.' });
   }
 
   db.prepare('DELETE FROM rdo_records WHERE id = ?').run(rdoId);
@@ -2404,6 +2789,19 @@ app.delete('/api/pluviometry/:id', authenticate, (req, res) => {
 
   db.prepare('DELETE FROM pluviometry WHERE id = ?').run(pluvId);
   res.json({ success: true });
+});
+
+// Erros de upload (tipo/tamanho de arquivo) e demais erros das rotas da API
+app.use('/api', (err, _req, res, _next) => {
+  if (err instanceof multer.MulterError) {
+    const msg = err.code === 'LIMIT_FILE_SIZE' ? 'Arquivo muito grande (máximo 15 MB).' : err.message;
+    return res.status(400).json({ error: msg });
+  }
+  if (err.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'Envio muito grande. Reduza a quantidade ou o tamanho das imagens.' });
+  }
+  console.error(err);
+  res.status(err.status || 500).json({ error: err.status ? err.message : 'Erro interno do servidor.' });
 });
 
 // Serve frontend production build if available

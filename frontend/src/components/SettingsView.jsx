@@ -20,9 +20,10 @@ import {
   AlignLeft,
   AlignCenter,
   AlignRight,
-  Type
+  Type,
+  Download
 } from 'lucide-react';
-import { apiRequest } from '../api';
+import { apiRequest, getStoredToken } from '../api';
 
 const PARAM_GROUPS = [
   { key: 'TYPE', label: '1. Categoria / Tipo de Ocorrência' },
@@ -183,8 +184,47 @@ export default function SettingsView({ projects, selectedProjectId, currentUser 
 
   const filteredParams = paramsList.filter((p) => p.group_key === activeParamGroup);
 
+  const handleDownloadBackup = async () => {
+    try {
+      const response = await fetch('/api/admin/backup', {
+        headers: { Authorization: `Bearer ${getStoredToken()}` }
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || `Erro HTTP ${response.status}`);
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `axis_obra_backup_${new Date().toISOString().slice(0, 10)}.db`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert(`Não foi possível gerar o backup: ${err.message}`);
+    }
+  };
+
   return (
     <div className="space-y-6">
+      {currentUser?.role === 'ADMIN' && (
+        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-bold text-slate-900">Backup do banco de dados</h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Baixa uma cópia completa dos dados (obras, RDOs, ocorrências, usuários...). As fotos ficam na pasta de uploads do servidor.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleDownloadBackup}
+            className="shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold"
+          >
+            <Download className="w-4 h-4" /> Baixar backup
+          </button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>

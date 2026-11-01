@@ -515,7 +515,7 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
   };
 
   // Save RDO as Draft or Final
-  const handleSaveRdo = async (newStatus = 'draft') => {
+  const handleSaveRdo = async (newStatus = 'draft', reopenReason = '') => {
     setSaving(true);
     setErrorMessage('');
     setSuccessMessage('');
@@ -538,7 +538,7 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
         fiscal_notes: rdoData.fiscal_notes || '',
         services_developed: cleanServices,
         status: newStatus,
-        reopened_reason: newStatus === 'draft' && rdoData.status === 'final' ? 'Reaberto para correções manuais.' : ''
+        reopened_reason: reopenReason
       };
 
       const res = await apiRequest('/api/rdo', {
@@ -551,13 +551,17 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
         ...prev,
         ...res,
         services_developed: cleanServices,
-        status: newStatus
+        status: res.status || newStatus
       }));
 
       if (newStatus === 'final') {
-        setSuccessMessage(`RDO Folha Nº ${rdoData.folio_number} FINALIZADO com sucesso! Folha bloqueada para edições.`);
+        setSuccessMessage(`RDO Folha Nº ${res.folio_number} FINALIZADO com sucesso! Folha bloqueada para edições.`);
       } else {
-        setSuccessMessage(`RDO Folha Nº ${rdoData.folio_number} salvo em Rascunho com sucesso!`);
+        setSuccessMessage(
+          reopenReason
+            ? `RDO Folha Nº ${res.folio_number} reaberto para correções.`
+            : `RDO Folha Nº ${res.folio_number} salvo em Rascunho com sucesso!`
+        );
       }
       setTimeout(() => setSuccessMessage(''), 4000);
       loadExistingRdos(targetProjectId);
@@ -580,7 +584,13 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
 
   // Reopen RDO for editing
   const handleReopenRdo = () => {
-    handleSaveRdo('draft');
+    const reason = window.prompt('Informe o motivo da reabertura desta folha (fica registrado no histórico):', '');
+    if (reason === null) return;
+    if (!reason.trim()) {
+      alert('O motivo da reabertura é obrigatório.');
+      return;
+    }
+    handleSaveRdo('draft', reason.trim());
   };
 
   // Sync services from photo catalog for current day

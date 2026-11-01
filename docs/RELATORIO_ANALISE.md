@@ -1,6 +1,6 @@
 # Relatório de Análise Técnica — AXIS OBRA
 
-**Data da análise:** 01/11/2026 (2ª revisão)
+**Data da análise:** 01/11/2026 (3ª revisão — após implementação das correções)
 **Base analisada:** `origin/main` em `4c1cfdd` — *feat(occurrences): add photo attachments, SLA/lead-time KPIs and status reports*
 **Objetivo:** documentar o estado atual do sistema e orientar a continuidade do desenvolvimento (handoff para outro agente/desenvolvedor).
 
@@ -10,6 +10,61 @@
 > - **Ocorrências:** anexos fotográficos por fase (registro/tratativa/conclusão), histórico de mudança de status, prazo (`due_date`), data de resolução (`resolved_at`), indicadores de SLA/lead time e relatórios por status (PDF/Excel).
 >
 > **Status dos problemas da 1ª análise:** nenhum dos itens de segurança, o bug B1 ou as pendências de documentação foram corrigidos. Os itens continuam abaixo, com **novos achados** marcados como 🆕.
+
+---
+
+## 0. Status da implementação (3ª revisão)
+
+Implementado na branch `claude/finish-repository-l1vcze`. Os itens das seções 4–5 abaixo foram mantidos como registro da análise; esta tabela indica o que já foi resolvido.
+
+| Item | Status | O que foi feito |
+|---|---|---|
+| S1 login sem senha | ✅ | Removido. Login só por senha ou código enviado por e-mail |
+| S2 `x-user-id` | ✅ | Removido do backend e do frontend; só token Bearer |
+| S3 `demo-users` público | ✅ | Rota removida; tela de login sem "Acesso Rápido" e sem nomes de usuários |
+| S4 `GET /api/users` | ✅ | Somente ADMIN |
+| S5 `TOKEN_SECRET` fixo | ✅ | Variável de ambiente ou segredo aleatório salvo em `backend/data/.token_secret` |
+| S6 hash de senha | ✅ | `scrypt` com salt por usuário; hashes antigos migram no primeiro login |
+| S7 login pré-preenchido | ✅ | Campos vazios |
+| S8 configurações sem perfil | ✅ | `report-settings` e `occurrence-params` só ADMIN/ENGENHEIRO |
+| S9 `sync-services` | ✅ | Checa acesso à obra |
+| S10 XSS por SVG | ✅ | Base64 só JPG/PNG/WEBP/GIF com checagem de assinatura e 10 MB; Multer com filtro de tipo; `/uploads` com `nosniff` + CSP `sandbox` |
+| S11 CORS aberto | ✅ | Desligado por padrão; `CORS_ORIGIN` opcional |
+| S12 força bruta | ✅ | Limite de falhas por e-mail e IP; limite de pedidos de código |
+| R1 folha final editável | ✅ | 409 ao editar/excluir folha finalizada |
+| R2 reabertura | ✅ | Só ADMIN/ENGENHEIRO, motivo obrigatório (perguntado na tela), tabela `rdo_history` |
+| R3 nº da folha | ✅ | Calculado no servidor + índice único `(project_id, folio_number)` |
+| R4 colunas inexistentes no lote | ✅ | Corrigido |
+| R5 status antigo | ✅ | Migração para `draft`/`final` |
+| R6 lote sem transação | ✅ | `BEGIN/COMMIT/ROLLBACK` |
+| B1 rota `reset` | ✅ | `POST /api/occurrence-params/reset` |
+| B2 / D1 login com 6 módulos | ✅ | Nova tela com os 8 módulos; formulário primeiro no celular |
+| F1 gestão de usuários | ✅ | Editar, perfil, desativar/reativar, definir senha (ADMIN), alterar a própria senha |
+| F2 sessão/401 | ✅ | `/api/auth/me` ao abrir; 401 global volta ao login |
+| F3 backup | ✅ (banco) | `GET /api/admin/backup` + botão em Configurações. Fotos: copiar o volume `uploads` |
+| F4 permissões por perfil | ✅ (backend) | FISCAL somente leitura; ENCARREGADO não finaliza/reabre/exclui RDO. Os botões ainda aparecem na tela (o servidor recusa com mensagem) |
+| O1 fotos de ocorrência | ✅ | Redução no navegador (1600 px, JPEG 82%) |
+| O2 bundle | ✅ | `React.lazy` por módulo: carregamento inicial de ~580 KB para ~197 KB |
+| D2 README | ✅ | Atualizado; modelo de workflow corrigido (uso inválido de `secrets` no `if`) e com etapa de testes |
+| D3 documentação | ✅ | `DOCUMENTACAO_SISTEMA.md` reescrito |
+| D4 `.env.example` | ✅ | Criado |
+| D5 `database.sqlite` | ✅ | Removido do git; `backend/data/*` ignorado |
+| D6 código morto | ✅ | Removido |
+| D7 seeds em produção | ✅ | Extras de demonstração só em banco novo |
+| Q1 testes | ✅ | `backend/test/api.test.js` (20 testes, `npm test`) |
+| **Novo:** login por código | ✅ | `request-code` / `login-code` (6 dígitos, 10 min, uso único, 5 tentativas) |
+| **Novo:** recuperação de senha | ✅ | `request-code` (RESET) / `reset-password` |
+| **Novo:** administrador principal | ✅ | `cesarsecco@gmail.com`, senha inicial `123456` (configurável por `ADMIN_*`) |
+| **Novo:** simular acesso seguro | ✅ | `impersonate` / `stop-impersonation` (só ADMIN; faixa de aviso e botão de voltar) |
+
+### Pendências após esta revisão
+1. **Contas de demonstração com senha `123456`** (`admin@axisobra.com.br`, `mariana@`, `roberto@`, `joao@`) continuam existindo em bancos já criados e em instalações novas. `admin@axisobra.com.br` é ADMIN. **Desativar em produção** (Obras por Usuário → Editar → Desativar) ou trocar as senhas.
+2. Configurar **SMTP** em produção (sem ele, login por código e "Esqueci minha senha" ficam ocultos).
+3. Trocar a senha inicial do administrador principal.
+4. Ocultar na tela os botões que o perfil não pode usar (FISCAL, ENCARREGADO no RDO).
+5. O Módulo 1 ainda aceita SVG no upload multipart (usado pelo gerador de carimbo de demonstração); está neutralizado pelo CSP `sandbox`, mas pode ser restrito quando o gerador for removido.
+6. Q2–Q6: ESLint/Prettier, separar `server.js` em rotas, dividir componentes grandes, fixar versão do Node na imagem Docker, revisar dados de seed.
+7. Ativar o workflow (copiar `deploy/github-actions-deploy.yml` para `.github/workflows/`).
 
 ---
 

@@ -1,5 +1,9 @@
 const STORAGE_TOKEN_KEY = 'axis_obra_token';
 const STORAGE_USER_KEY = 'axis_obra_user';
+const STORAGE_IMPERSONATOR_KEY = 'axis_obra_impersonator';
+
+// Evento disparado quando a sessão expira (HTTP 401) — o App volta para a tela de login.
+export const UNAUTHORIZED_EVENT = 'axis:unauthorized';
 
 export function getStoredToken() {
   return localStorage.getItem(STORAGE_TOKEN_KEY);
@@ -14,26 +18,34 @@ export function getStoredUser() {
   }
 }
 
-export function setAuthSession(token, user) {
+export function getStoredImpersonator() {
+  try {
+    const raw = localStorage.getItem(STORAGE_IMPERSONATOR_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setAuthSession(token, user, impersonator) {
   if (token) localStorage.setItem(STORAGE_TOKEN_KEY, token);
   if (user) localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(user));
+  if (impersonator) localStorage.setItem(STORAGE_IMPERSONATOR_KEY, JSON.stringify(impersonator));
+  else localStorage.removeItem(STORAGE_IMPERSONATOR_KEY);
 }
 
 export function clearAuthSession() {
   localStorage.removeItem(STORAGE_TOKEN_KEY);
   localStorage.removeItem(STORAGE_USER_KEY);
+  localStorage.removeItem(STORAGE_IMPERSONATOR_KEY);
 }
 
 export async function apiRequest(path, options = {}) {
   const token = getStoredToken();
-  const user = getStoredUser();
 
   const headers = { ...(options.headers || {}) };
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
-  }
-  if (user?.id) {
-    headers['x-user-id'] = String(user.id);
   }
   if (!(options.body instanceof FormData) && !headers['Content-Type']) {
     headers['Content-Type'] = 'application/json';
@@ -45,6 +57,10 @@ export async function apiRequest(path, options = {}) {
   });
 
   const data = await response.json().catch(() => ({}));
+  if (response.status === 401 && token && !path.startsWith('/api/auth/login')) {
+    clearAuthSession();
+    window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
+  }
   if (!response.ok) {
     throw new Error(data.error || `Erro HTTP ${response.status}`);
   }

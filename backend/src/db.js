@@ -3,8 +3,10 @@ const path = require('node:path');
 const fs = require('node:fs');
 const crypto = require('node:crypto');
 
-const dataDir = path.join(__dirname, '..', 'data');
-const uploadsDir = path.join(__dirname, '..', 'uploads');
+const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, '..', 'data');
+const uploadsDir = process.env.UPLOADS_DIR
+  ? path.resolve(process.env.UPLOADS_DIR)
+  : path.join(__dirname, '..', 'uploads');
 
 if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
@@ -13,15 +15,41 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-const dbPath = path.join(dataDir, 'axis_obra.db');
+const dbPath = process.env.DB_PATH ? path.resolve(process.env.DB_PATH) : path.join(dataDir, 'axis_obra.db');
 const db = new DatabaseSync(dbPath);
 
 // Enable foreign keys and WAL mode for performance
 db.exec('PRAGMA foreign_keys = ON;');
 db.exec('PRAGMA journal_mode = WAL;');
 
-function hashPassword(password) {
+// Hash legado (SHA-256 + salt fixo) — mantido apenas para validar senhas antigas e migrá-las no login.
+function legacyHashPassword(password) {
   return crypto.createHash('sha256').update(password + '_axis_salt_2026').digest('hex');
+}
+
+// Hash atual: scrypt com salt aleatório por usuário. Formato: scrypt$<salt hex>$<hash hex>
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(String(password), salt, 64).toString('hex');
+  return `scrypt$${salt}$${hash}`;
+}
+
+function verifyPassword(password, stored) {
+  if (!stored || password === undefined || password === null) return false;
+  if (stored.startsWith('scrypt$')) {
+    const [, salt, hash] = stored.split('$');
+    if (!salt || !hash) return false;
+    const candidate = crypto.scryptSync(String(password), salt, 64);
+    const expected = Buffer.from(hash, 'hex');
+    return expected.length === candidate.length && crypto.timingSafeEqual(candidate, expected);
+  }
+  const legacy = Buffer.from(legacyHashPassword(String(password)));
+  const expected = Buffer.from(stored);
+  return legacy.length === expected.length && crypto.timingSafeEqual(legacy, expected);
+}
+
+function isLegacyHash(stored) {
+  return !!stored && !stored.startsWith('scrypt$');
 }
 
 function initDatabase() {
@@ -243,6 +271,30 @@ function initDatabase() {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
       UNIQUE (project_id, rdo_date)
     );
+
+    CREATE TABLE IF NOT EXISTS rdo_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      rdo_id INTEGER NOT NULL,
+      user_id INTEGER,
+      user_name TEXT DEFAULT '',
+      action TEXT NOT NULL,
+      note TEXT DEFAULT '',
+      changed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (rdo_id) REFERENCES rdo_records(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS auth_codes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      purpose TEXT NOT NULL,
+      code_hash TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      attempts INTEGER DEFAULT 0,
+      used_at INTEGER,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
   `);
 
   ensureSamplePhotos();
@@ -250,10 +302,47 @@ function initDatabase() {
   ensureReportSettingsColumns();
   ensureRdoColumns();
   ensureOccurrenceColumns();
+  migrateRdoStatus();
+  ensureRdoFolioIndex();
   seedOccurrenceParamsIfEmpty();
   seedReportSettingsIfEmpty();
-  seedIfEmpty();
-  ensureOccurrenceSeedExtras();
+  const freshDatabase = seedIfEmpty();
+  // Dados extras de demonstração só são criados em banco novo — nunca alteram dados reais de produção.
+  if (freshDatabase) ensureOccurrenceSeedExtras();
+  ensureMainAdmin();
+}
+
+// Administrador principal do sistema. Criado se não existir (a senha só é definida na criação).
+const MAIN_ADMIN_EMAIL = (process.env.ADMIN_EMAIL || 'cesarsecco@gmail.com').trim().toLowerCase();
+const MAIN_ADMIN_NAME = process.env.ADMIN_NAME || 'Cesar Augusto Secco';
+const MAIN_ADMIN_INITIAL_PASSWORD = process.env.ADMIN_INITIAL_PASSWORD || '123456';
+
+function ensureMainAdmin() {
+  const existing = db.prepare('SELECT id, role, active FROM users WHERE LOWER(email) = ?').get(MAIN_ADMIN_EMAIL);
+  if (existing) {
+    if (existing.role !== 'ADMIN' || !existing.active) {
+      db.prepare("UPDATE users SET role = 'ADMIN', active = 1 WHERE id = ?").run(existing.id);
+    }
+    return;
+  }
+  db.prepare(
+    "INSERT INTO users (name, email, password_hash, role, active) VALUES (?, ?, ?, 'ADMIN', 1)"
+  ).run(MAIN_ADMIN_NAME, MAIN_ADMIN_EMAIL, hashPassword(MAIN_ADMIN_INITIAL_PASSWORD));
+  console.log(`Administrador principal criado: ${MAIN_ADMIN_EMAIL}`);
+}
+
+// Status antigos do RDO (ex.: EM_ANDAMENTO) passam a ser 'draft'.
+function migrateRdoStatus() {
+  db.exec("UPDATE rdo_records SET status = 'draft' WHERE status IS NULL OR status NOT IN ('draft', 'final');");
+}
+
+// Numeração de folha única por obra. Se houver duplicidades antigas, avisa e não cria o índice.
+function ensureRdoFolioIndex() {
+  try {
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_rdo_project_folio ON rdo_records(project_id, folio_number);');
+  } catch (err) {
+    console.warn('Aviso: existem RDOs com número de folha duplicado na mesma obra; índice único não criado.', err.message);
+  }
 }
 
 function ensureOccurrenceColumns() {
@@ -614,7 +703,7 @@ function seedReportSettingsIfEmpty() {
 function seedIfEmpty() {
   const countRow = db.prepare('SELECT COUNT(*) as total FROM users').get();
   if (countRow && countRow.total > 0) {
-    return;
+    return false;
   }
 
   console.log('Populando banco de dados inicial do AXIS OBRA...');
@@ -906,273 +995,17 @@ function seedIfEmpty() {
   insertPluviometry.run(proj3Id, eng1Id, '2026-10-29', 'NUBLADO', 'CHUVA_FRACA', 'SEM_EXPEDIENTE', 6.5, 'SEM_IMPACTO', 0, 17, 24, 'Obra predominantemente interna, sem impacto no cronograma.');
 
   console.log('Seed inicial do AXIS OBRA concluído com sucesso!');
-}
-
-function seedRdoIfEmpty() {
-  // RDOs não são semeados artificialmente para dias sem dados;
-  // eles devem ser criados pelo usuário ou pelo gerador de lote com base nas fotos/atividades reais.
-  return;
-}
-
-function _unusedSeedRdo() {
-  if (countRow && countRow.total > 0) return;
-
-  const proj = db.prepare("SELECT id FROM projects WHERE code = 'OBR-2026-001'").get() || db.prepare('SELECT id FROM projects LIMIT 1').get();
-  if (!proj) return;
-  const admin = db.prepare('SELECT id FROM users LIMIT 1').get();
-
-  const insertRdo = db.prepare(`
-    INSERT INTO rdo_records (
-      project_id, user_id, folio_number, rdo_date, weather_condition, work_code,
-      work_force_count, work_force_sufficient, representative_engineer, representative_present,
-      contractor_notes, supervisor_notes, fiscal_notes, services_developed
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  const samples = [
-    {
-      folio: 1,
-      date: '2026-09-01',
-      weather: 'IMPRATICAVEL',
-      workForce: 320,
-      sufficient: 1,
-      rep: 'DANIELLE NARDINO',
-      present: 1,
-      contractorNotes: '',
-      supervisorNotes: 'DER/PR SUPERINTENDÊNCIA REGIONAL NOROESTE',
-      fiscalNotes: '',
-      services: [
-        'EXECUÇÃO DE BSTC Ø0,60',
-        'APLICAÇÃO DE FORMAS PARA CONCRETAGEM DO MURO C2',
-        'EXECUÇÃO DE ARMADURA PARA MURO C2',
-        'MURO C7 - COLOCAÇÃO DE TELA ELETROSOLDADA PARA PROJETADO',
-        'LANÇAMENTO DE MATERIAL PARA SUBBASE',
-        'PLANTIO DE GRAMA',
-        'MURO C7 - EXECUÇÃO DE DRENO LONGITUDINAL'
-      ]
-    },
-    {
-      folio: 2,
-      date: '2026-09-02',
-      weather: 'INSTAVEL',
-      workForce: 320,
-      sufficient: 1,
-      rep: 'DANIELLE NARDINO',
-      present: 1,
-      contractorNotes: '',
-      supervisorNotes: 'DER/PR SUPERINTENDÊNCIA REGIONAL NOROESTE',
-      fiscalNotes: '',
-      services: [
-        'EXECUÇÃO DE BSTC RAMO 600 - IGUARAÇÚ',
-        'ESCAVAÇÃO RAMO 600 - IGUARAÇÚ',
-        'EXECUÇÃO DE TELA ELETROSOLDADA PARA PROJETADO MUDO C7',
-        'EXECUÇÃO DE DRENO LONGITUDINAL',
-        'APLICAÇÃO DE FORMAS PARA MURO C2',
-        'EXECUÇÃO DE TIRANTES DE REFORÇO PARA MURO C7',
-        'PLANTIO DE GRAMA',
-        'INJEÇÃO DE TIRANTES MURO C2',
-        'LANÇAMENTO DE MATERIAL PARA SUB-BASE',
-        'COMPACTAÇÃO DE SUB-BASE'
-      ]
-    },
-    {
-      folio: 3,
-      date: '2026-09-03',
-      weather: 'INSTAVEL',
-      workForce: 122,
-      sufficient: 1,
-      rep: 'DANIELLE NARDINO',
-      present: 1,
-      contractorNotes: '',
-      supervisorNotes: 'DER/PR SUPERINTENDÊNCIA REGIONAL NOROESTE',
-      fiscalNotes: '',
-      services: [
-        'LANÇAMENTO DE CBUQ FAIXA C',
-        'APLICAÇÃO DE TELA ELETROSOLDADA PARA PROJETADO MURO C7',
-        'DESFORMA DO MUTO C7',
-        'EXECUÇÃO DE CANALETA PARA DRENAGEM',
-        'PLANTIO DE GRAMA',
-        'LANÇAMENTO DE BGMC PARA BASE',
-        'EXECUÇÃO DE DRENAGEM CANAL CRC',
-        'TERRAPLENAGEM TRECHO IGUARAÇU'
-      ]
-    },
-    {
-      folio: 4,
-      date: '2026-09-04',
-      weather: 'INSTAVEL',
-      workForce: 310,
-      sufficient: 1,
-      rep: 'DANIELLE NARDINO',
-      present: 1,
-      contractorNotes: '',
-      supervisorNotes: 'DER/PR SUPERINTENDÊNCIA REGIONAL NOROESTE',
-      fiscalNotes: '',
-      services: [
-        'TERRAPLENAGEM TREVO IGUARAÇÚ',
-        'APLICAÇÃO DE RACHÃO PARA REFORÇO DO SUBLEITO',
-        'APLICAÇÃO DE BGMC PARA BASE',
-        'DESCORMA MURO C2',
-        'MURO C7 - APLICAÇÃO DE CONCRETO PROJETADO',
-        'EXECUÇÃO DE TSD NA DUPLICAÇÃO'
-      ]
-    },
-    {
-      folio: 5,
-      date: '2026-09-05',
-      weather: 'CHUVOSO',
-      workForce: 180,
-      sufficient: 1,
-      rep: 'DANIELLE NARDINO',
-      present: 1,
-      contractorNotes: '',
-      supervisorNotes: 'DER/PR SUPERINTENDÊNCIA REGIONAL NOROESTE',
-      fiscalNotes: '',
-      services: [
-        'PERFUTAÇÃO DE TIRANTES MURO C2',
-        'EXECUÇÃO DE DRENAGEM CRC',
-        'INDICATIVO DE CHUVA - 7,4MM',
-        'DESFORMA MURO C2'
-      ]
-    },
-    {
-      folio: 6,
-      date: '2026-09-06',
-      weather: 'CHUVOSO',
-      workForce: 45,
-      sufficient: 1,
-      rep: 'DANIELLE NARDINO',
-      present: 1,
-      contractorNotes: 'IMPRATICÁVEL PELA CHUVA DO DIA ANTEIOR',
-      supervisorNotes: 'DER/PR SUPERINTENDÊNCIA REGIONAL NOROESTE',
-      fiscalNotes: '',
-      services: []
-    },
-    {
-      folio: 7,
-      date: '2026-09-07',
-      weather: 'IMPRATICAVEL',
-      workForce: 50,
-      sufficient: 1,
-      rep: 'DANIELLE NARDINO',
-      present: 1,
-      contractorNotes: 'IMPRATICÁVEL PELA CHUVA DO DIA ANTERIOR',
-      supervisorNotes: 'DER/PR SUPERINTENDÊNCIA REGIONAL NOROESTE',
-      fiscalNotes: '',
-      services: []
-    },
-    {
-      folio: 8,
-      date: '2026-09-08',
-      weather: 'INSTAVEL',
-      workForce: 295,
-      sufficient: 1,
-      rep: 'DANIELLE NARDINO',
-      present: 1,
-      contractorNotes: '',
-      supervisorNotes: 'DER/PR SUPERINTENDÊNCIA REGIONAL NOROESTE',
-      fiscalNotes: '',
-      services: [
-        'EXECUÇÃO DE ARMADURA MURO C7',
-        'IMPLANTAÇÃO DE DEFESA METÁLICA',
-        'TERRAPLENAGEM, ESCAVAÇÃO DE MAT 1 CAT',
-        'APLICAÇÃO DE CBUQ FX C',
-        'APLICAÇÃO DE REFORÇO EM RACHÃO',
-        'EXECUÇÃO DE DRENAGEM SUPERFICIAL',
-        'LANÇAMENTO DE BGMC PARA BASE',
-        'ASSENTAMENTO DE CANAL EM CONCRETO CRC',
-        'APLICAÇÃO DE CONCRETO PROJETADO'
-      ]
-    },
-    {
-      folio: 9,
-      date: '2026-09-09',
-      weather: 'BOM',
-      workForce: 330,
-      sufficient: 1,
-      rep: 'DANIELLE NARDINO',
-      present: 1,
-      contractorNotes: '',
-      supervisorNotes: 'DER/PR SUPERINTENDÊNCIA REGIONAL NOROESTE',
-      fiscalNotes: '',
-      services: [
-        'APLICAÇÃO DE RACHÃO PARA REFORÇO DO SUBLEITO',
-        'MURO C2 - PERGURAÇÃO DE TIRANTES PARA',
-        'MURO C2 - INSTALAÇÃO DE PAINEIS PARA CONCRETAGEM',
-        'MURO C2 - INSTALAÇÃO DE ARMADURA',
-        'COLOCAÇÃO DE TELA ELETROSOLDADA PARA MURO PROJETADO',
-        'MURO C7 - APLICAÇÃO DE CONCRETO PROJETADO',
-        'MURO C7 - APLICAÇÃO DE TELA ELETROSOLDADA PARA PROJETADO',
-        '1. MURO C7 - APLICAÇÃO DE TELA ELETROSOLDADA PARA PROJETADO 2. ESCAVAÇÃO DE MATERIAL DE 1 CAT',
-        'EXECUÇÃO DE DRENAGEM SUPERFICIAL',
-        'IMPLANTAÇÃO DE DEFESA METÁLICA',
-        'INSTALAÇÃO DE DEFENSA SEMI-MALEÁVEL'
-      ]
-    },
-    {
-      folio: 10,
-      date: '2026-09-10',
-      weather: 'CHUVOSO',
-      workForce: 160,
-      sufficient: 1,
-      rep: 'DANIELLE NARDINO',
-      present: 1,
-      contractorNotes: 'TRECHO AINDA APRESENTA IMPRATICABILIDADE PELAS CHUVAS',
-      supervisorNotes: 'DER/PR SUPERINTENDÊNCIA REGIONAL NOROESTE',
-      fiscalNotes: '',
-      services: [
-        'MURO C2 - PERGURAÇÃO PARA INSTALAÇÃO DE TIRANTES'
-      ]
-    },
-    {
-      folio: 11,
-      date: '2026-09-11',
-      weather: 'CHUVOSO',
-      workForce: 210,
-      sufficient: 1,
-      rep: 'DANIELLE NARDINO',
-      present: 1,
-      contractorNotes: '',
-      supervisorNotes: 'DER/PR SUPERINTENDÊNCIA REGIONAL NOROESTE',
-      fiscalNotes: '',
-      services: [
-        'APLICAÇÃO DE CBUQ FX C',
-        'MURO C7 - APLICAÇÃO DE TELA ELETROSOLDADA PARA PROJETADO',
-        'MURO C2 - INSTALAÇÃO DE PAINEIS PARA CONCRETAGEM',
-        'MURO C2 - PERGURAÇÃO PARA INSTALAÇÃO DE TIRANTES',
-        'APLICAÇÃO DE RACHÃO PARA REFORÇO DO SUBLEITO',
-        'ENLEIVAMENTO',
-        'ASSENTAMENTO DE MEIO-FIO',
-        'EXECUÇÃO DE DRENAGEM SUPERFICIAL',
-        'ASSENTAMENTO DE CANAL EM CONCRETO CRC'
-      ]
-    }
-  ];
-
-  samples.forEach((s) => {
-    insertRdo.run(
-      proj.id,
-      admin ? admin.id : null,
-      s.folio,
-      s.date,
-      s.weather,
-      'CO141/2025 - DT',
-      s.workForce,
-      s.sufficient,
-      s.rep,
-      s.present,
-      s.contractorNotes,
-      s.supervisorNotes,
-      s.fiscalNotes,
-      JSON.stringify(s.services)
-    );
-  });
+  return true;
 }
 
 module.exports = {
   db,
   initDatabase,
   hashPassword,
+  verifyPassword,
+  isLegacyHash,
+  seedOccurrenceParamsIfEmpty,
+  dataDir,
   uploadsDir
 };
 

@@ -12,6 +12,7 @@
     "start": "node backend/src/server.js",
     "start:backend": "npm --prefix backend start",
     "start:frontend": "npm --prefix frontend run dev",
-    "build:frontend": "npm --prefix frontend run build"
+    "build:frontend": "npm --prefix frontend run build",
+    "test": "npm --prefix backend test"
   }
 }
