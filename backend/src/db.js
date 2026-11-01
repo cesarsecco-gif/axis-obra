@@ -194,9 +194,26 @@ function initDatabase() {
   `);
 
   ensureSamplePhotos();
+  ensurePluviometryColumns();
   seedOccurrenceParamsIfEmpty();
   seedReportSettingsIfEmpty();
   seedIfEmpty();
+}
+
+function ensurePluviometryColumns() {
+  const cols = db.prepare("PRAGMA table_info('pluviometry')").all().map((c) => c.name);
+  const additions = [
+    ['morning_mm', 'REAL DEFAULT 0'],
+    ['afternoon_mm', 'REAL DEFAULT 0'],
+    ['night_mm', 'REAL DEFAULT 0'],
+    ['production_tons', 'REAL DEFAULT 0'],
+    ['station_name', "TEXT DEFAULT 'Pluviômetro / INMET'"]
+  ];
+  for (const [colName, colDef] of additions) {
+    if (!cols.includes(colName)) {
+      db.exec(`ALTER TABLE pluviometry ADD COLUMN ${colName} ${colDef};`);
+    }
+  }
 }
 
 function createSampleSvgPhoto(filename, title, subtitle, stage, date, primaryColor, accentColor) {

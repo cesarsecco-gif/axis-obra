@@ -1540,8 +1540,13 @@ app.post('/api/pluviometry', authenticate, (req, res) => {
     afternoon_weather,
     night_weather,
     rainfall_mm,
+    morning_mm,
+    afternoon_mm,
+    night_mm,
     work_impact,
     hours_lost,
+    production_tons,
+    station_name,
     temperature_min,
     temperature_max,
     notes
@@ -1556,13 +1561,22 @@ app.post('/api/pluviometry', authenticate, (req, res) => {
     return res.status(403).json({ error: 'Sem permissão para registrar pluviometria nesta obra.' });
   }
 
+  const mMm = Number(morning_mm) || 0;
+  const aMm = Number(afternoon_mm) || 0;
+  const nMm = Number(night_mm) || 0;
+  const shiftSum = Number((mMm + aMm + nMm).toFixed(1));
+  const totalMm = Number(rainfall_mm) > 0 ? Number(rainfall_mm) : shiftSum;
+  // Se o usuário preencheu apenas o total diário (ou fonte 12 UTC), aloca no turno correspondente caso os turnos estejam zerados
+  const finalAfternoonMm = shiftSum === 0 && totalMm > 0 ? totalMm : aMm;
+
   const info = db
     .prepare(`
       INSERT INTO pluviometry (
         project_id, user_id, record_date, morning_weather, afternoon_weather, night_weather,
-        rainfall_mm, work_impact, hours_lost, temperature_min, temperature_max, notes
+        rainfall_mm, morning_mm, afternoon_mm, night_mm, work_impact, hours_lost,
+        production_tons, station_name, temperature_min, temperature_max, notes
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
     .run(
       pid,
@@ -1571,11 +1585,16 @@ app.post('/api/pluviometry', authenticate, (req, res) => {
       morning_weather,
       afternoon_weather,
       night_weather || 'SEM_EXPEDIENTE',
-      Number(rainfall_mm) || 0,
+      totalMm,
+      mMm,
+      finalAfternoonMm,
+      nMm,
       work_impact || 'SEM_IMPACTO',
       Number(hours_lost) || 0,
-      temperature_min !== '' && temperature_min !== undefined ? Number(temperature_min) : null,
-      temperature_max !== '' && temperature_max !== undefined ? Number(temperature_max) : null,
+      Number(production_tons) || 0,
+      station_name || 'INMET / Pluviômetro de Obra',
+      temperature_min !== '' && temperature_min !== undefined && temperature_min !== null ? Number(temperature_min) : null,
+      temperature_max !== '' && temperature_max !== undefined && temperature_max !== null ? Number(temperature_max) : null,
       notes || ''
     );
 
@@ -1590,6 +1609,146 @@ app.post('/api/pluviometry', authenticate, (req, res) => {
     .get(Number(info.lastInsertRowid));
 
   res.status(201).json(created);
+});
+
+app.put('/api/pluviometry/:id', authenticate, (req, res) => {
+  const pluvId = Number(req.params.id);
+  const existing = db.prepare('SELECT * FROM pluviometry WHERE id = ?').get(pluvId);
+  if (!existing) return res.status(404).json({ error: 'Registro pluviométrico não encontrado.' });
+
+  if (!canUserAccessProject(req.user, existing.project_id)) {
+    return res.status(403).json({ error: 'Sem permissão.' });
+  }
+
+  const {
+    project_id,
+    record_date,
+    morning_weather,
+    afternoon_weather,
+    night_weather,
+    rainfall_mm,
+    morning_mm,
+    afternoon_mm,
+    night_mm,
+    work_impact,
+    hours_lost,
+    production_tons,
+    station_name,
+    temperature_min,
+    temperature_max,
+    notes
+  } = req.body;
+
+  const targetPid = project_id ? Number(project_id) : existing.project_id;
+  const mMm = morning_mm !== undefined ? Number(morning_mm) || 0 : Number(existing.morning_mm) || 0;
+  const aMm = afternoon_mm !== undefined ? Number(afternoon_mm) || 0 : Number(existing.afternoon_mm) || 0;
+  const nMm = night_mm !== undefined ? Number(night_mm) || 0 : Number(existing.night_mm) || 0;
+  const shiftSum = Number((mMm + aMm + nMm).toFixed(1));
+  const totalMm = rainfall_mm !== undefined ? Number(rainfall_mm) || 0 : shiftSum;
+  const finalAfternoonMm = shiftSum === 0 && totalMm > 0 ? totalMm : aMm;
+
+  db.prepare(`
+    UPDATE pluviometry
+    SET project_id = ?, record_date = ?, morning_weather = ?, afternoon_weather = ?, night_weather = ?,
+        rainfall_mm = ?, morning_mm = ?, afternoon_mm = ?, night_mm = ?,
+        work_impact = ?, hours_lost = ?, production_tons = ?, station_name = ?,
+        temperature_min = ?, temperature_max = ?, notes = ?
+    WHERE id = ?
+  `).run(
+    targetPid,
+    record_date || existing.record_date,
+    morning_weather || existing.morning_weather,
+    afternoon_weather || existing.afternoon_weather,
+    night_weather || existing.night_weather,
+    totalMm,
+    mMm,
+    finalAfternoonMm,
+    nMm,
+    work_impact || existing.work_impact,
+    hours_lost !== undefined ? Number(hours_lost) || 0 : existing.hours_lost,
+    production_tons !== undefined ? Number(production_tons) || 0 : existing.production_tons,
+    station_name !== undefined ? station_name : existing.station_name,
+    temperature_min !== '' && temperature_min !== undefined ? Number(temperature_min) : null,
+    temperature_max !== '' && temperature_max !== undefined ? Number(temperature_max) : null,
+    notes !== undefined ? notes : existing.notes,
+    pluvId
+  );
+
+  const updated = db
+    .prepare(`
+      SELECT pl.*, p.name as project_name, p.code as project_code, u.name as author_name
+      FROM pluviometry pl
+      JOIN projects p ON p.id = pl.project_id
+      LEFT JOIN users u ON u.id = pl.user_id
+      WHERE pl.id = ?
+    `)
+    .get(pluvId);
+
+  res.json(updated);
+});
+
+app.post('/api/pluviometry/batch', authenticate, (req, res) => {
+  const { project_id, station_name, records, overwrite_existing } = req.body;
+  if (!project_id || !Array.isArray(records) || records.length === 0) {
+    return res.status(400).json({ error: 'Informe a obra e a lista de registros para importação.' });
+  }
+
+  const pid = Number(project_id);
+  if (!canUserAccessProject(req.user, pid)) {
+    return res.status(403).json({ error: 'Sem permissão para importar dados nesta obra.' });
+  }
+
+  const checkExisting = db.prepare('SELECT id FROM pluviometry WHERE project_id = ? AND record_date = ?');
+  const deleteExisting = db.prepare('DELETE FROM pluviometry WHERE project_id = ? AND record_date = ?');
+  const insertStmt = db.prepare(`
+    INSERT INTO pluviometry (
+      project_id, user_id, record_date, morning_weather, afternoon_weather, night_weather,
+      rainfall_mm, morning_mm, afternoon_mm, night_mm, work_impact, hours_lost,
+      production_tons, station_name, temperature_min, temperature_max, notes
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  let importedCount = 0;
+  for (const r of records) {
+    if (!r.record_date) continue;
+    const exists = checkExisting.get(pid, r.record_date);
+    if (exists) {
+      if (overwrite_existing !== false) {
+        deleteExisting.run(pid, r.record_date);
+      } else {
+        continue;
+      }
+    }
+
+    const totalMm = Number(r.rainfall_mm) || 0;
+    const mMm = Number(r.morning_mm) || 0;
+    const aMm = Number(r.afternoon_mm) || (mMm === 0 && Number(r.night_mm || 0) === 0 ? totalMm : 0);
+    const nMm = Number(r.night_mm) || 0;
+
+    insertStmt.run(
+      pid,
+      req.user.id,
+      r.record_date,
+      r.morning_weather || (mMm >= 10 ? 'CHUVA_FORTE' : mMm > 0 ? 'CHUVA_FRACA' : 'SOL'),
+      r.afternoon_weather || (aMm >= 25 ? 'IMPRATICAVEL' : aMm >= 10 ? 'CHUVA_FORTE' : aMm > 0 ? 'CHUVA_FRACA' : 'SOL'),
+      r.night_weather || (nMm >= 10 ? 'CHUVA_FORTE' : nMm > 0 ? 'CHUVA_FRACA' : 'SEM_EXPEDIENTE'),
+      totalMm,
+      mMm,
+      aMm,
+      nMm,
+      r.work_impact || (totalMm >= 30 ? 'PARALISACAO_TOTAL' : totalMm >= 10 ? 'IMPACTO_PARCIAL' : 'SEM_IMPACTO'),
+      Number(r.hours_lost) || (totalMm >= 30 ? 8 : totalMm >= 10 ? 3 : 0),
+      Number(r.production_tons) || 0,
+      r.station_name || station_name || 'INMET CSV',
+      r.temperature_min !== null && r.temperature_min !== undefined && r.temperature_min !== '' ? Number(r.temperature_min) : null,
+      r.temperature_max !== null && r.temperature_max !== undefined && r.temperature_max !== '' ? Number(r.temperature_max) : null,
+      r.notes || `Importado via CSV (${r.station_name || station_name || 'INMET'})`
+    );
+    importedCount++;
+  }
+
+  res.status(201).json({ success: true, importedCount });
 });
 
 app.delete('/api/pluviometry/:id', authenticate, (req, res) => {
