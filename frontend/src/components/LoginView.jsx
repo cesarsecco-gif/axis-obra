@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { KeyRound, Mail, Lock, ArrowLeft, ShieldCheck } from 'lucide-react';
+import { KeyRound, Mail, Lock, ArrowLeft, ShieldCheck, Eye, EyeOff } from 'lucide-react';
 import { apiRequest } from '../api';
 
 const MODULES = [
@@ -19,6 +19,42 @@ const primaryBtn =
   'w-full py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-slate-950 font-bold text-sm shadow-lg shadow-amber-500/10 transition';
 const linkBtn = 'text-xs font-semibold text-amber-400 hover:text-amber-300 transition';
 
+// O campo só fica editável quando a pessoa clica/toca nele. Assim o navegador não
+// preenche e-mail e senha sozinho ao abrir a tela (os campos aparecem em branco).
+function useNoAutofill() {
+  const [locked, setLocked] = useState(true);
+  const unlock = () => setLocked(false);
+  return { readOnly: locked, onFocus: unlock, onMouseDown: unlock, onTouchStart: unlock };
+}
+
+// Campo de senha com botão para mostrar/ocultar o que foi digitado
+function PasswordInput({ value, onChange, autoComplete, minLength, guard = {} }) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <div className="relative">
+      <input
+        type={visible ? 'text' : 'password'}
+        required
+        minLength={minLength}
+        autoComplete={autoComplete}
+        value={value}
+        onChange={onChange}
+        className={`${inputClass} pr-11`}
+        {...guard}
+      />
+      <button
+        type="button"
+        onClick={() => setVisible((v) => !v)}
+        className="absolute inset-y-0 right-0 px-3 flex items-center text-slate-400 hover:text-amber-400 transition"
+        aria-label={visible ? 'Ocultar senha' : 'Mostrar senha'}
+        title={visible ? 'Ocultar senha' : 'Mostrar senha'}
+      >
+        {visible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+      </button>
+    </div>
+  );
+}
+
 // Modos: PASSWORD (e-mail e senha) | CODE (código por e-mail) | RESET (recuperar senha)
 export default function LoginView({ onLoggedIn }) {
   const [mode, setMode] = useState('PASSWORD');
@@ -32,6 +68,8 @@ export default function LoginView({ onLoggedIn }) {
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [loading, setLoading] = useState(false);
+  const emailGuard = useNoAutofill();
+  const passwordGuard = useNoAutofill();
 
   useEffect(() => {
     apiRequest('/api/auth/options')
@@ -120,6 +158,7 @@ export default function LoginView({ onLoggedIn }) {
         type="email"
         required
         autoComplete="email"
+        {...emailGuard}
         value={email}
         disabled={codeSent && mode !== 'PASSWORD'}
         onChange={(e) => setEmail(e.target.value)}
@@ -246,13 +285,11 @@ export default function LoginView({ onLoggedIn }) {
                     </button>
                   )}
                 </div>
-                <input
-                  type="password"
-                  required
+                <PasswordInput
                   autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className={inputClass}
+                  guard={passwordGuard}
                 />
               </div>
               <button type="submit" disabled={loading} className={primaryBtn}>
@@ -304,26 +341,20 @@ export default function LoginView({ onLoggedIn }) {
                   {codeField}
                   <div>
                     <label className="block text-xs font-semibold text-slate-300 mb-1">Nova senha (mínimo 6 caracteres)</label>
-                    <input
-                      type="password"
-                      required
+                    <PasswordInput
                       minLength={6}
                       autoComplete="new-password"
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
-                      className={inputClass}
                     />
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-slate-300 mb-1">Confirmar nova senha</label>
-                    <input
-                      type="password"
-                      required
+                    <PasswordInput
                       minLength={6}
                       autoComplete="new-password"
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
-                      className={inputClass}
                     />
                   </div>
                 </>
