@@ -131,12 +131,40 @@ function initDatabase() {
       severity TEXT NOT NULL,
       status TEXT DEFAULT 'ABERTA',
       occurrence_date TEXT NOT NULL,
+      due_date TEXT DEFAULT '',
+      resolved_at TEXT DEFAULT '',
       location_area TEXT,
       description TEXT NOT NULL,
       action_taken TEXT,
       responsible TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS occurrence_photos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      occurrence_id INTEGER NOT NULL,
+      user_id INTEGER,
+      image_url TEXT NOT NULL,
+      caption TEXT DEFAULT '',
+      phase TEXT DEFAULT 'REGISTRO',
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (occurrence_id) REFERENCES occurrences(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS occurrence_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      occurrence_id INTEGER NOT NULL,
+      user_id INTEGER,
+      user_name TEXT DEFAULT '',
+      from_status TEXT DEFAULT '',
+      to_status TEXT NOT NULL,
+      note TEXT DEFAULT '',
+      changed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (occurrence_id) REFERENCES occurrences(id) ON DELETE CASCADE,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
     );
 
@@ -221,9 +249,131 @@ function initDatabase() {
   ensurePluviometryColumns();
   ensureReportSettingsColumns();
   ensureRdoColumns();
+  ensureOccurrenceColumns();
   seedOccurrenceParamsIfEmpty();
   seedReportSettingsIfEmpty();
   seedIfEmpty();
+  ensureOccurrenceSeedExtras();
+}
+
+function ensureOccurrenceColumns() {
+  const cols = db.prepare("PRAGMA table_info('occurrences')").all().map((c) => c.name);
+  const additions = [
+    ['due_date', "TEXT DEFAULT ''"],
+    ['resolved_at', "TEXT DEFAULT ''"],
+    ['updated_at', "TEXT DEFAULT ''"]
+  ];
+  for (const [colName, colDef] of additions) {
+    if (!cols.includes(colName)) {
+      db.exec(`ALTER TABLE occurrences ADD COLUMN ${colName} ${colDef};`);
+    }
+  }
+}
+
+function ensureOccurrenceSeedExtras() {
+  try {
+    const occs = db.prepare('SELECT * FROM occurrences ORDER BY id ASC').all();
+    if (!occs || occs.length === 0) return;
+
+    // Backfill due_date and resolved_at on initial seed occurrences if empty
+    for (const o of occs) {
+      if (!o.due_date && !o.resolved_at) {
+        if (o.status === 'RESOLVIDA') {
+          // Resolved 3 days after occurrence_date
+          const d = new Date(o.occurrence_date + 'T12:00:00');
+          if (!isNaN(d.getTime())) {
+            const due = new Date(d);
+            due.setDate(due.getDate() + 4);
+            const res = new Date(d);
+            res.setDate(res.getDate() + 3);
+            db.prepare('UPDATE occurrences SET due_date = ?, resolved_at = ? WHERE id = ?').run(
+              due.toISOString().split('T')[0],
+              res.toISOString().split('T')[0],
+              o.id
+            );
+          }
+        } else if (o.occurrence_date) {
+          const d = new Date(o.occurrence_date + 'T12:00:00');
+          if (!isNaN(d.getTime())) {
+            const due = new Date(d);
+            due.setDate(due.getDate() + (o.severity === 'ALTA' || o.severity === 'CRITICA' ? 3 : 7));
+            db.prepare('UPDATE occurrences SET due_date = ? WHERE id = ?').run(
+              due.toISOString().split('T')[0],
+              o.id
+            );
+          }
+        }
+      }
+    }
+
+    // Add 2 more resolved sample occurrences if total is <= 4 so KPIs (average resolution time by type) have rich data
+    if (occs.length === 4) {
+      const proj1 = occs[0].project_id;
+      const proj2 = occs[2] ? occs[2].project_id : proj1;
+      const user1 = occs[0].user_id;
+      const ins = db.prepare(`
+        INSERT INTO occurrences (project_id, user_id, title, type, severity, status, occurrence_date, due_date, resolved_at, location_area, description, action_taken, responsible)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      ins.run(
+        proj1,
+        user1,
+        'Adequação de guarda-corpo provisório na periferia do 7º pavimento',
+        'SEGURANCA',
+        'ALTA',
+        'RESOLVIDA',
+        '2026-10-20',
+        '2026-10-22',
+        '2026-10-21',
+        'Torre A - Fachada Leste',
+        'Identificado trecho de 4,5m com tela fachadeira destensionada após desforma de viga periférica.',
+        'Equipe de carpintaria de segurança refez a fixação dos montantes metálicos e tensionamento imediato da tela.',
+        'Luciana (TST) / Mestre Antônio'
+      );
+      ins.run(
+        proj2,
+        user1,
+        'Revisão de fôrma e escoramento de fundo de viga V-304',
+        'QUALIDADE',
+        'MEDIA',
+        'RESOLVIDA',
+        '2026-10-18',
+        '2026-10-24',
+        '2026-10-23',
+        'Torre A - Estrutura e Fôrmas',
+        'Conferência topográfica pré-concretagem apontou desvio de 12mm na contraflecha da viga V-304.',
+        'Ajustados os forcados metálicos das torres de cimbramento e revalidado nível a laser pela equipe de qualidade.',
+        'Eng. Mariana Costa'
+      );
+    }
+
+    // Seed sample occurrence photos if occurrence_photos is empty
+    const photoCount = db.prepare('SELECT COUNT(*) as total FROM occurrence_photos').get();
+    if (!photoCount || photoCount.total === 0) {
+      const allOccs = db.prepare('SELECT id, type, status, user_id FROM occurrences ORDER BY id ASC').all();
+      const insPhoto = db.prepare(`
+        INSERT INTO occurrence_photos (occurrence_id, user_id, image_url, caption, phase)
+        VALUES (?, ?, ?, ?, ?)
+      `);
+      if (allOccs[0]) {
+        insPhoto.run(allOccs[0].id, allOccs[0].user_id, '/uploads/foto-seguranca-bandeja.svg', 'Bloqueio preventivo e sinalização da Cabine B no 6º pavimento', 'REGISTRO');
+      }
+      if (allOccs[1]) {
+        insPhoto.run(allOccs[1].id, allOccs[1].user_id, '/uploads/foto-armacao-vigas.svg', 'Recebimento e conferência dos lotes de aço CA-50 no pátio térreo', 'CONCLUSAO');
+      }
+      if (allOccs[2]) {
+        insPhoto.run(allOccs[2].id, allOccs[2].user_id, '/uploads/foto-fundacao-estacas.svg', 'Instalação de bombas submersíveis e proteção de talude com lona', 'TRATATIVA');
+      }
+      if (allOccs[3]) {
+        insPhoto.run(allOccs[3].id, allOccs[3].user_id, '/uploads/foto-instalacoes-hidraulica.svg', 'Registro da interferência entre duto HVAC e prumada de sprinklers', 'REGISTRO');
+      }
+      if (allOccs[4]) {
+        insPhoto.run(allOccs[4].id, allOccs[4].user_id, '/uploads/foto-seguranca-bandeja.svg', 'Guarda-corpo e bandeja periférica readequados conforme NR-18', 'CONCLUSAO');
+      }
+    }
+  } catch (err) {
+    console.error('Erro ao garantir extras de ocorrências:', err.message);
+  }
 }
 
 function ensureRdoColumns() {

@@ -1374,6 +1374,67 @@ app.delete('/api/occurrence-params/:id', authenticate, (req, res) => {
   res.json({ success: true });
 });
 
+// ---------------------------------------------------------------------------
+// MÓDULO 3 — OCORRÊNCIAS (com anexos fotográficos, histórico e datas de atendimento)
+// ---------------------------------------------------------------------------
+const getResolvedStatusCodes = () => {
+  const codes = db
+    .prepare("SELECT code FROM occurrence_params WHERE group_key = 'STATUS' AND is_resolved = 1")
+    .all()
+    .map((r) => r.code);
+  if (codes.length === 0) codes.push('RESOLVIDA');
+  return codes;
+};
+
+const todayISO = () => new Date().toISOString().slice(0, 10);
+
+const OCC_SELECT = `
+  SELECT oc.*, p.name as project_name, p.code as project_code, u.name as author_name
+  FROM occurrences oc
+  JOIN projects p ON p.id = oc.project_id
+  LEFT JOIN users u ON u.id = oc.user_id
+`;
+
+const attachOccurrencePhotos = (rows) => {
+  if (!rows.length) return rows;
+  const ids = rows.map((r) => r.id);
+  const ph = ids.map(() => '?').join(',');
+  const photos = db
+    .prepare(`SELECT * FROM occurrence_photos WHERE occurrence_id IN (${ph}) ORDER BY id ASC`)
+    .all(...ids);
+  const map = new Map();
+  photos.forEach((p) => {
+    if (!map.has(p.occurrence_id)) map.set(p.occurrence_id, []);
+    map.get(p.occurrence_id).push(p);
+  });
+  return rows.map((r) => ({ ...r, photos: map.get(r.id) || [] }));
+};
+
+const getOccurrenceFull = (occId) => {
+  const row = db.prepare(`${OCC_SELECT} WHERE oc.id = ?`).get(occId);
+  if (!row) return null;
+  return attachOccurrencePhotos([row])[0];
+};
+
+const saveBase64Image = (dataUrl, prefix = 'occ') => {
+  if (!dataUrl || typeof dataUrl !== 'string') return null;
+  const matches = dataUrl.match(/^data:image\/([a-zA-Z0-9+.-]+);base64,(.+)$/);
+  if (!matches) return null;
+  let ext = matches[1].toLowerCase();
+  if (ext === 'jpeg') ext = 'jpg';
+  if (ext === 'svg+xml') ext = 'svg';
+  const filename = `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  fs.writeFileSync(path.join(uploadsDir, filename), Buffer.from(matches[2], 'base64'));
+  return `/uploads/${filename}`;
+};
+
+const logOccurrenceHistory = (occId, user, fromStatus, toStatus, note) => {
+  db.prepare(
+    `INSERT INTO occurrence_history (occurrence_id, user_id, user_name, from_status, to_status, note)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(occId, user?.id || null, user?.name || '', fromStatus || '', toStatus || '', note || '');
+};
+
 app.get('/api/occurrences', authenticate, (req, res) => {
   const { projectId, status, severity } = req.query;
   const accessible = req.accessibleProjectIds;
@@ -1389,13 +1450,7 @@ app.get('/api/occurrences', authenticate, (req, res) => {
   }
 
   const placeholders = targetIds.map(() => '?').join(',');
-  let query = `
-    SELECT oc.*, p.name as project_name, p.code as project_code, u.name as author_name
-    FROM occurrences oc
-    JOIN projects p ON p.id = oc.project_id
-    LEFT JOIN users u ON u.id = oc.user_id
-    WHERE oc.project_id IN (${placeholders})
-  `;
+  let query = `${OCC_SELECT} WHERE oc.project_id IN (${placeholders})`;
   const params = [...targetIds];
 
   if (status && status !== 'ALL') {
@@ -1409,6 +1464,19 @@ app.get('/api/occurrences', authenticate, (req, res) => {
 
   query += ' ORDER BY oc.occurrence_date DESC, oc.id DESC';
   const rows = db.prepare(query).all(...params);
+  res.json(attachOccurrencePhotos(rows));
+});
+
+app.get('/api/occurrences/:id/history', authenticate, (req, res) => {
+  const occId = Number(req.params.id);
+  const existing = db.prepare('SELECT * FROM occurrences WHERE id = ?').get(occId);
+  if (!existing) return res.status(404).json({ error: 'Ocorrência não encontrada.' });
+  if (!canUserAccessProject(req.user, existing.project_id)) {
+    return res.status(403).json({ error: 'Sem permissão.' });
+  }
+  const rows = db
+    .prepare('SELECT * FROM occurrence_history WHERE occurrence_id = ? ORDER BY changed_at ASC, id ASC')
+    .all(occId);
   res.json(rows);
 });
 
@@ -1423,7 +1491,10 @@ app.post('/api/occurrences', authenticate, (req, res) => {
     location_area,
     description,
     action_taken,
-    responsible
+    responsible,
+    due_date,
+    resolved_at,
+    photos
   } = req.body;
 
   if (!project_id || !title || !type || !severity || !description) {
@@ -1435,10 +1506,16 @@ app.post('/api/occurrences', authenticate, (req, res) => {
     return res.status(403).json({ error: 'Sem permissão para registrar ocorrências nesta obra.' });
   }
 
+  const finalStatus = status || 'ABERTA';
+  const occDate = occurrence_date || todayISO();
+  const isResolved = getResolvedStatusCodes().includes(finalStatus);
+  const finalResolvedAt = isResolved ? resolved_at || todayISO() : '';
+
   const info = db
     .prepare(`
-      INSERT INTO occurrences (project_id, user_id, title, type, severity, status, occurrence_date, location_area, description, action_taken, responsible)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO occurrences (project_id, user_id, title, type, severity, status, occurrence_date, location_area,
+                               description, action_taken, responsible, due_date, resolved_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
     .run(
       pid,
@@ -1446,25 +1523,31 @@ app.post('/api/occurrences', authenticate, (req, res) => {
       title.trim(),
       type,
       severity,
-      status || 'ABERTA',
-      occurrence_date || new Date().toISOString().slice(0, 10),
+      finalStatus,
+      occDate,
       location_area || '',
       description.trim(),
       action_taken || '',
-      responsible || req.user.name
+      responsible || req.user.name,
+      due_date || '',
+      finalResolvedAt,
+      new Date().toISOString()
     );
 
-  const created = db
-    .prepare(`
-      SELECT oc.*, p.name as project_name, p.code as project_code, u.name as author_name
-      FROM occurrences oc
-      JOIN projects p ON p.id = oc.project_id
-      LEFT JOIN users u ON u.id = oc.user_id
-      WHERE oc.id = ?
-    `)
-    .get(Number(info.lastInsertRowid));
+  const occId = Number(info.lastInsertRowid);
+  logOccurrenceHistory(occId, req.user, '', finalStatus, 'Ocorrência registrada');
 
-  res.status(201).json(created);
+  if (Array.isArray(photos)) {
+    const ins = db.prepare(
+      'INSERT INTO occurrence_photos (occurrence_id, user_id, image_url, caption, phase) VALUES (?, ?, ?, ?, ?)'
+    );
+    photos.slice(0, 20).forEach((ph) => {
+      const url = saveBase64Image(ph?.base64);
+      if (url) ins.run(occId, req.user.id, url, ph.caption || '', ph.phase || 'REGISTRO');
+    });
+  }
+
+  res.status(201).json(getOccurrenceFull(occId));
 });
 
 app.put('/api/occurrences/:id', authenticate, (req, res) => {
@@ -1485,38 +1568,52 @@ app.put('/api/occurrences/:id', authenticate, (req, res) => {
     location_area,
     description,
     action_taken,
-    responsible
+    responsible,
+    due_date,
+    resolved_at,
+    status_note
   } = req.body;
+
+  const newStatus = status || existing.status;
+  const resolvedCodes = getResolvedStatusCodes();
+  const wasResolved = resolvedCodes.includes(existing.status);
+  const nowResolved = resolvedCodes.includes(newStatus);
+
+  let finalResolvedAt = existing.resolved_at || '';
+  if (nowResolved) {
+    if (resolved_at) finalResolvedAt = resolved_at;
+    else if (!wasResolved || !finalResolvedAt) finalResolvedAt = todayISO();
+  } else {
+    finalResolvedAt = '';
+  }
 
   db.prepare(`
     UPDATE occurrences
     SET title = ?, type = ?, severity = ?, status = ?, occurrence_date = ?,
-        location_area = ?, description = ?, action_taken = ?, responsible = ?
+        location_area = ?, description = ?, action_taken = ?, responsible = ?,
+        due_date = ?, resolved_at = ?, updated_at = ?
     WHERE id = ?
   `).run(
     title || existing.title,
     type || existing.type,
     severity || existing.severity,
-    status || existing.status,
+    newStatus,
     occurrence_date || existing.occurrence_date,
     location_area !== undefined ? location_area : existing.location_area,
     description || existing.description,
     action_taken !== undefined ? action_taken : existing.action_taken,
     responsible !== undefined ? responsible : existing.responsible,
+    due_date !== undefined ? due_date || '' : existing.due_date || '',
+    finalResolvedAt,
+    new Date().toISOString(),
     occId
   );
 
-  const updated = db
-    .prepare(`
-      SELECT oc.*, p.name as project_name, p.code as project_code, u.name as author_name
-      FROM occurrences oc
-      JOIN projects p ON p.id = oc.project_id
-      LEFT JOIN users u ON u.id = oc.user_id
-      WHERE oc.id = ?
-    `)
-    .get(occId);
+  if (newStatus !== existing.status) {
+    logOccurrenceHistory(occId, req.user, existing.status, newStatus, status_note || '');
+  }
 
-  res.json(updated);
+  res.json(getOccurrenceFull(occId));
 });
 
 app.delete('/api/occurrences/:id', authenticate, (req, res) => {
@@ -1528,7 +1625,83 @@ app.delete('/api/occurrences/:id', authenticate, (req, res) => {
     return res.status(403).json({ error: 'Sem permissão.' });
   }
 
+  const photos = db.prepare('SELECT image_url FROM occurrence_photos WHERE occurrence_id = ?').all(occId);
+  db.prepare('DELETE FROM occurrence_photos WHERE occurrence_id = ?').run(occId);
+  db.prepare('DELETE FROM occurrence_history WHERE occurrence_id = ?').run(occId);
   db.prepare('DELETE FROM occurrences WHERE id = ?').run(occId);
+  photos.forEach((p) => {
+    try {
+      const fp = path.join(uploadsDir, path.basename(p.image_url || ''));
+      if (p.image_url && p.image_url.startsWith('/uploads/') && fs.existsSync(fp)) fs.unlinkSync(fp);
+    } catch (_e) {
+      /* ignora falha ao remover arquivo */
+    }
+  });
+  res.json({ success: true });
+});
+
+// Anexar fotos a uma ocorrência existente (base64 em lote)
+app.post('/api/occurrences/:id/photos', authenticate, (req, res) => {
+  const occId = Number(req.params.id);
+  const existing = db.prepare('SELECT * FROM occurrences WHERE id = ?').get(occId);
+  if (!existing) return res.status(404).json({ error: 'Ocorrência não encontrada.' });
+  if (!canUserAccessProject(req.user, existing.project_id)) {
+    return res.status(403).json({ error: 'Sem permissão.' });
+  }
+
+  const { photos } = req.body;
+  if (!Array.isArray(photos) || photos.length === 0) {
+    return res.status(400).json({ error: 'Nenhuma imagem enviada.' });
+  }
+
+  const ins = db.prepare(
+    'INSERT INTO occurrence_photos (occurrence_id, user_id, image_url, caption, phase) VALUES (?, ?, ?, ?, ?)'
+  );
+  let saved = 0;
+  photos.slice(0, 20).forEach((ph) => {
+    const url = saveBase64Image(ph?.base64);
+    if (url) {
+      ins.run(occId, req.user.id, url, ph.caption || '', ph.phase || 'REGISTRO');
+      saved += 1;
+    }
+  });
+  if (saved === 0) return res.status(400).json({ error: 'Formato de imagem inválido.' });
+
+  res.status(201).json(getOccurrenceFull(occId));
+});
+
+app.put('/api/occurrence-photos/:photoId', authenticate, (req, res) => {
+  const photoId = Number(req.params.photoId);
+  const photo = db.prepare('SELECT * FROM occurrence_photos WHERE id = ?').get(photoId);
+  if (!photo) return res.status(404).json({ error: 'Foto não encontrada.' });
+  const occ = db.prepare('SELECT project_id FROM occurrences WHERE id = ?').get(photo.occurrence_id);
+  if (!occ || !canUserAccessProject(req.user, occ.project_id)) {
+    return res.status(403).json({ error: 'Sem permissão.' });
+  }
+  const { caption, phase } = req.body;
+  db.prepare('UPDATE occurrence_photos SET caption = ?, phase = ? WHERE id = ?').run(
+    caption !== undefined ? caption : photo.caption,
+    phase || photo.phase,
+    photoId
+  );
+  res.json(db.prepare('SELECT * FROM occurrence_photos WHERE id = ?').get(photoId));
+});
+
+app.delete('/api/occurrence-photos/:photoId', authenticate, (req, res) => {
+  const photoId = Number(req.params.photoId);
+  const photo = db.prepare('SELECT * FROM occurrence_photos WHERE id = ?').get(photoId);
+  if (!photo) return res.status(404).json({ error: 'Foto não encontrada.' });
+  const occ = db.prepare('SELECT project_id FROM occurrences WHERE id = ?').get(photo.occurrence_id);
+  if (!occ || !canUserAccessProject(req.user, occ.project_id)) {
+    return res.status(403).json({ error: 'Sem permissão.' });
+  }
+  db.prepare('DELETE FROM occurrence_photos WHERE id = ?').run(photoId);
+  try {
+    const fp = path.join(uploadsDir, path.basename(photo.image_url || ''));
+    if (photo.image_url && photo.image_url.startsWith('/uploads/') && fs.existsSync(fp)) fs.unlinkSync(fp);
+  } catch (_e) {
+    /* ignora */
+  }
   res.json({ success: true });
 });
 
