@@ -1792,7 +1792,7 @@ app.post('/api/rdo', authenticate, (req, res) => {
 
 // Batch generation matching Relatorio-DER-PR 1.9.1 createRdoBatch behavior
 app.post('/api/rdo/batch', authenticate, (req, res) => {
-  const { project_id, defaults = {}, include_empty = false } = req.body;
+  const { project_id, defaults = {}, include_empty = false, fromDate, toDate } = req.body;
   if (!project_id) return res.status(400).json({ error: 'Informe a obra.' });
 
   const pid = Number(project_id);
@@ -1805,20 +1805,33 @@ app.post('/api/rdo/batch', authenticate, (req, res) => {
     .all(pid);
   const photoDates = [...new Set(photos.map((p) => p.taken_at).filter(Boolean))].sort();
 
-  if (photoDates.length === 0) {
-    return res.status(400).json({ error: 'Esta obra não tem fotos registradas com data válida.' });
-  }
+  let targetDates = [];
 
-  let targetDates = [...photoDates];
   if (include_empty) {
-    const start = new Date(photoDates[0] + 'T12:00:00Z');
-    const end = new Date(photoDates[photoDates.length - 1] + 'T12:00:00Z');
+    let startStr = fromDate || (photoDates.length > 0 ? photoDates[0] : null);
+    let endStr = toDate || (photoDates.length > 0 ? photoDates[photoDates.length - 1] : null);
+
+    if (!startStr || !endStr) {
+      return res.status(400).json({ error: 'Informe a data inicial e final do período.' });
+    }
+    if (startStr > endStr) {
+      [startStr, endStr] = [endStr, startStr];
+    }
+    const start = new Date(startStr + 'T12:00:00Z');
+    const end = new Date(endStr + 'T12:00:00Z');
     if ((+end - +start) / 86400000 > 366) {
       return res.status(400).json({ error: 'O intervalo selecionado ultrapassa 366 dias.' });
     }
-    targetDates = [];
     for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
       targetDates.push(d.toISOString().slice(0, 10));
+    }
+  } else {
+    if (photoDates.length === 0) {
+      return res.status(400).json({ error: 'Esta obra não tem fotos registradas com data válida.' });
+    }
+    targetDates = photoDates.filter((d) => (!fromDate || d >= fromDate) && (!toDate || d <= toDate));
+    if (targetDates.length === 0) {
+      return res.status(400).json({ error: 'Nenhuma data com foto encontrada no período selecionado.' });
     }
   }
 

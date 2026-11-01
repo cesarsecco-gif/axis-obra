@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   FileText,
-  Calendar,
+  Calendar as CalendarIcon,
   ChevronLeft,
   ChevronRight,
   Save,
@@ -12,16 +12,6 @@ import {
   Trash2,
   CheckCircle2,
   Building2,
-  HardHat,
-  Shield,
-  Layers,
-  List,
-  Clock,
-  CloudRain,
-  Sun,
-  Cloud,
-  CloudLightning,
-  AlertCircle,
   Lock,
   Unlock,
   Download,
@@ -29,7 +19,9 @@ import {
   Check,
   X,
   AlertTriangle,
-  Info
+  AlertCircle,
+  CalendarDays,
+  FileStack
 } from 'lucide-react';
 import { apiRequest, formatDateBR } from '../api';
 
@@ -43,11 +35,27 @@ const WEEKDAYS = [
   { key: 6, label: 'SÁB' }
 ];
 
+const MONTHS_LIST = [
+  { key: 'ALL', label: 'Todos os Meses' },
+  { key: '01', label: '01 — Janeiro' },
+  { key: '02', label: '02 — Fevereiro' },
+  { key: '03', label: '03 — Março' },
+  { key: '04', label: '04 — Abril' },
+  { key: '05', label: '05 — Maio' },
+  { key: '06', label: '06 — Junho' },
+  { key: '07', label: '07 — Julho' },
+  { key: '08', label: '08 — Agosto' },
+  { key: '09', label: '09 — Setembro' },
+  { key: '10', label: '10 — Outubro' },
+  { key: '11', label: '11 — Novembro' },
+  { key: '12', label: '12 — Dezembro' }
+];
+
 const WEATHER_CHOICES = [
-  { key: 'BOM', label: 'BOM', icon: Sun },
-  { key: 'INSTAVEL', label: 'INSTÁVEL', icon: Cloud },
-  { key: 'CHUVOSO', label: 'CHUVOSO', icon: CloudRain },
-  { key: 'IMPRATICAVEL', label: 'IMPRATICÁVEL', icon: CloudLightning }
+  { key: 'BOM', label: 'BOM' },
+  { key: 'INSTAVEL', label: 'INSTÁVEL' },
+  { key: 'CHUVOSO', label: 'CHUVOSO' },
+  { key: 'IMPRATICAVEL', label: 'IMPRATICÁVEL' }
 ];
 
 function brDate(iso) {
@@ -70,37 +78,41 @@ function parseServices(raw) {
 }
 
 export default function RdoView({ projects, selectedProjectId, currentUser }) {
-  const [viewMode, setViewMode] = useState('SHEET'); // 'SHEET' | 'LIST'
   const [targetProjectId, setTargetProjectId] = useState(
     selectedProjectId !== 'ALL' ? selectedProjectId : (projects[0]?.id || '')
   );
 
-  // Interval filter for RDO pills and exports
-  const [fromDate, setFromDate] = useState(() => {
-    const d = new Date();
-    d.setDate(1);
-    return d.toISOString().slice(0, 10);
-  });
-  const [toDate, setToDate] = useState(() => {
-    const d = new Date();
-    d.setMonth(d.getMonth() + 1);
-    d.setDate(0);
-    return d.toISOString().slice(0, 10);
-  });
+  // Quick Year and Month filters
+  const [selectedYear, setSelectedYear] = useState('2026');
+  const [selectedMonth, setSelectedMonth] = useState('ALL');
 
-  // Current active date
-  const [currentDate, setCurrentDate] = useState(() => new Date().toISOString().slice(0, 10));
+  // Interval filter for RDO pills and exports
+  const [fromDate, setFromDate] = useState('2026-10-01');
+  const [toDate, setToDate] = useState('2026-11-30');
+
+  // Current active date being viewed / edited
+  const [currentDate, setCurrentDate] = useState('2026-11-01');
+
+  // Custom Calendar Dropdown State
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [calMonth, setCalMonth] = useState(10); // 0-based: 10 = Nov
+  const [calYear, setCalYear] = useState(2026);
+  const calendarRef = useRef(null);
 
   // Loading & Action states
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [batchActionLoading, setBatchActionLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [validationIssues, setValidationIssues] = useState([]);
 
-  // Existing RDOs list in current project & date range
+  // Existing RDOs list in current project
   const [existingRdos, setExistingRdos] = useState([]);
+
+  // Summary of photos per date for this project
+  const [photoDatesSummary, setPhotoDatesSummary] = useState([]);
 
   // State of the selected day's RDO
   const [dayExists, setDayExists] = useState(false);
@@ -134,7 +146,7 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
   // 20 lines slots per page
   const [servicesLines, setServicesLines] = useState(Array(20).fill(''));
 
-  // Modals
+  // Batch Generation Modal State
   const [batchModalOpen, setBatchModalOpen] = useState(false);
   const [batchDefaults, setBatchDefaults] = useState({
     professionals: '',
@@ -145,11 +157,36 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
   });
   const [includeEmptyBatch, setIncludeEmptyBatch] = useState(false);
   const [batchLoading, setBatchLoading] = useState(false);
-  const [photoDatesSummary, setPhotoDatesSummary] = useState([]);
 
-  // Export Modal
+  // Export Modal State
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [exportScope, setExportScope] = useState('period'); // 'month' | 'period' | 'current'
+
+  // Sync calMonth/calYear when currentDate changes
+  useEffect(() => {
+    if (currentDate) {
+      const [y, m] = currentDate.split('-').map(Number);
+      if (y && m) {
+        setCalYear(y);
+        setCalMonth(m - 1);
+      }
+    }
+  }, [currentDate]);
+
+  // Close calendar popover on outside click
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (calendarRef.current && !calendarRef.current.contains(e.target)) {
+        setCalendarOpen(false);
+      }
+    }
+    if (calendarOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [calendarOpen]);
 
   // Update targetProjectId if prop changes
   useEffect(() => {
@@ -160,18 +197,28 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
     }
   }, [selectedProjectId, projects, targetProjectId]);
 
-  // Load existing RDO records for the project
+  // Maps for fast O(1) calendar indicators
+  const rdosMap = useMemo(() => {
+    const map = new Map();
+    existingRdos.forEach((r) => map.set(r.rdo_date, r));
+    return map;
+  }, [existingRdos]);
+
+  const photoDatesMap = useMemo(() => {
+    const map = new Map();
+    photoDatesSummary.forEach((p) => map.set(p.date, p.photo_count));
+    return map;
+  }, [photoDatesSummary]);
+
+  // Load existing RDO records and photo dates summary for the project
   const loadExistingRdos = useCallback(async (pid) => {
     if (!pid) return;
     try {
       const list = await apiRequest(`/api/rdo?projectId=${pid}&order=ASC`);
       setExistingRdos(list || []);
 
-      if (list && list.length > 0) {
-        const dates = list.map((r) => r.rdo_date).sort();
-        setFromDate((prev) => (prev > dates[0] ? dates[0] : prev));
-        setToDate((prev) => (prev < dates[dates.length - 1] ? dates[dates.length - 1] : prev));
-      }
+      const pDates = await apiRequest(`/api/rdo/photo-dates?projectId=${pid}`);
+      setPhotoDatesSummary(pDates.dates || []);
     } catch (err) {
       console.error('Falha ao carregar lista de RDOs:', err);
     }
@@ -222,6 +269,37 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
     }
   }, [targetProjectId, currentDate, loadRdoForDate]);
 
+  // Handle Quick Year / Month Filter Changes
+  const handleYearFilterChange = (yr) => {
+    setSelectedYear(yr);
+    if (yr === 'ALL') {
+      setFromDate('2024-01-01');
+      setToDate('2030-12-31');
+    } else {
+      if (selectedMonth === 'ALL') {
+        setFromDate(`${yr}-01-01`);
+        setToDate(`${yr}-12-31`);
+      } else {
+        const lastDay = new Date(Number(yr), Number(selectedMonth), 0).getDate();
+        setFromDate(`${yr}-${selectedMonth}-01`);
+        setToDate(`${yr}-${selectedMonth}-${String(lastDay).padStart(2, '0')}`);
+      }
+    }
+  };
+
+  const handleMonthFilterChange = (mo) => {
+    setSelectedMonth(mo);
+    const yr = selectedYear === 'ALL' ? '2026' : selectedYear;
+    if (mo === 'ALL') {
+      setFromDate(`${yr}-01-01`);
+      setToDate(`${yr}-12-31`);
+    } else {
+      const lastDay = new Date(Number(yr), Number(mo), 0).getDate();
+      setFromDate(`${yr}-${mo}-01`);
+      setToDate(`${yr}-${mo}-${String(lastDay).padStart(2, '0')}`);
+    }
+  };
+
   // Day navigation handlers
   const handleShiftDate = (days) => {
     const [y, m, d] = currentDate.split('-').map(Number);
@@ -231,7 +309,8 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
   };
 
   const handleSetToday = () => {
-    setCurrentDate(new Date().toISOString().slice(0, 10));
+    const now = new Date().toISOString().slice(0, 10);
+    setCurrentDate(now);
   };
 
   // Filtered RDO pills within interval
@@ -242,6 +321,23 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
       return true;
     });
   }, [existingRdos, fromDate, toDate]);
+
+  // Count how many photo dates exist in current selected period
+  const photoDatesInPeriod = useMemo(() => {
+    return photoDatesSummary.filter((p) => {
+      if (fromDate && p.date < fromDate) return false;
+      if (toDate && p.date > toDate) return false;
+      return true;
+    });
+  }, [photoDatesSummary, fromDate, toDate]);
+
+  // Total days in selected period
+  const totalDaysInPeriod = useMemo(() => {
+    if (!fromDate || !toDate || fromDate > toDate) return 0;
+    const start = new Date(fromDate + 'T12:00:00Z');
+    const end = new Date(toDate + 'T12:00:00Z');
+    return Math.round((+end - +start) / 86400000) + 1;
+  }, [fromDate, toDate]);
 
   // Check validation issues for finalizing RDO
   const checkRdoIssues = () => {
@@ -269,7 +365,9 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
     return issues;
   };
 
-  // Create RDO for current date
+  // ============================================================================
+  // ACTION A: CREATE SINGLE RDO FOR CURRENT DAY
+  // ============================================================================
   const handleCreateRdoForCurrentDate = async () => {
     setSaving(true);
     setErrorMessage('');
@@ -321,6 +419,98 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
       setErrorMessage(err.message || 'Erro ao criar RDO.');
     } finally {
       setSaving(false);
+    }
+  };
+
+  // ============================================================================
+  // ACTION B: GENERATE RDOS FOR ALL DAYS WITH PHOTOS IN SELECTED PERIOD
+  // ============================================================================
+  const handleGenerateRdoForPhotoDaysInPeriod = async () => {
+    setBatchActionLoading(true);
+    setErrorMessage('');
+    try {
+      const res = await apiRequest('/api/rdo/batch', {
+        method: 'POST',
+        body: JSON.stringify({
+          project_id: targetProjectId,
+          fromDate,
+          toDate,
+          include_empty: false,
+          defaults: {
+            weather: 'BOM',
+            sufficient: 'SIM',
+            present: 'SIM',
+            contractorNotes: ''
+          }
+        })
+      });
+
+      const { created, skipped } = res;
+      setSuccessMessage(
+        `${created.length} RDO(s) gerado(s) para os dias com registro fotográfico do período! ${skipped.length} já existente(s) preservado(s).`
+      );
+      setTimeout(() => setSuccessMessage(''), 5000);
+      await loadExistingRdos(targetProjectId);
+
+      if (created.length > 0) {
+        setCurrentDate(created[0]);
+      } else {
+        await loadRdoForDate(currentDate, targetProjectId);
+      }
+    } catch (err) {
+      alert(err.message || 'Erro ao gerar RDOs para os dias com fotos.');
+    } finally {
+      setBatchActionLoading(false);
+    }
+  };
+
+  // ============================================================================
+  // ACTION C: GENERATE RDOS FOR ALL DAYS IN PERIOD (COMPLETE MONTH SUBMISSION)
+  // ============================================================================
+  const handleGenerateCompleteRdoForEveryDayInPeriod = async () => {
+    if (
+      !confirm(
+        `Deseja gerar as folhas de RDO para TODOS os ${totalDaysInPeriod} dias do período selecionado (${brDate(fromDate)} até ${brDate(toDate)})?\n\nDias com fotos receberão as atividades automaticamente; dias sem fotos (finais de semana, chuva, etc.) serão gerados em branco como rascunho para envio mensal completo.`
+      )
+    ) {
+      return;
+    }
+
+    setBatchActionLoading(true);
+    setErrorMessage('');
+    try {
+      const res = await apiRequest('/api/rdo/batch', {
+        method: 'POST',
+        body: JSON.stringify({
+          project_id: targetProjectId,
+          fromDate,
+          toDate,
+          include_empty: true,
+          defaults: {
+            weather: 'BOM',
+            sufficient: 'SIM',
+            present: 'SIM',
+            contractorNotes: ''
+          }
+        })
+      });
+
+      const { created, skipped } = res;
+      setSuccessMessage(
+        `${created.length} RDO(s) gerado(s) cobrindo todos os dias do período! ${skipped.length} já existente(s) preservado(s).`
+      );
+      setTimeout(() => setSuccessMessage(''), 5000);
+      await loadExistingRdos(targetProjectId);
+
+      if (created.length > 0) {
+        setCurrentDate(created[0]);
+      } else {
+        await loadRdoForDate(currentDate, targetProjectId);
+      }
+    } catch (err) {
+      alert(err.message || 'Erro ao gerar lote completo.');
+    } finally {
+      setBatchActionLoading(false);
     }
   };
 
@@ -441,22 +631,13 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
     }
   };
 
-  // Open Batch Generation Modal
-  const handleOpenBatchModal = async () => {
+  // Open Batch Generation Modal (Header Button)
+  const handleOpenBatchModal = () => {
     setBatchModalOpen(true);
-    setBatchLoading(true);
-    try {
-      const res = await apiRequest(`/api/rdo/photo-dates?projectId=${targetProjectId}`);
-      setPhotoDatesSummary(res.dates || []);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setBatchLoading(false);
-    }
   };
 
-  // Execute Batch Creation
-  const handleExecuteBatch = async () => {
+  // Execute Batch Creation from Modal
+  const handleExecuteBatchModal = async () => {
     setBatchLoading(true);
     setErrorMessage('');
     try {
@@ -464,6 +645,8 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
         method: 'POST',
         body: JSON.stringify({
           project_id: targetProjectId,
+          fromDate,
+          toDate,
           defaults: batchDefaults,
           include_empty: includeEmptyBatch
         })
@@ -532,6 +715,83 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
 
   const totalPages = Math.max(1, Math.ceil(servicesLines.length / 20));
   const isLocked = rdoData.status === 'final';
+
+  // ============================================================================
+  // CUSTOM CALENDAR GRID GENERATION (MONTH VIEW WITH PHOTO DOTS & RDO HIGHLIGHT)
+  // ============================================================================
+  const calendarDays = useMemo(() => {
+    const firstDay = new Date(calYear, calMonth, 1);
+    const lastDay = new Date(calYear, calMonth + 1, 0);
+    const daysInMonth = lastDay.getDate();
+    const startWeekday = firstDay.getDay(); // 0 = Sun, 1 = Mon...
+
+    const cells = [];
+
+    // Leading days from previous month
+    const prevMonthLastDay = new Date(calYear, calMonth, 0).getDate();
+    for (let i = startWeekday - 1; i >= 0; i--) {
+      const dNum = prevMonthLastDay - i;
+      const prevDate = new Date(calYear, calMonth - 1, dNum);
+      const iso = prevDate.toISOString().slice(0, 10);
+      cells.push({
+        dayNumber: dNum,
+        dateKey: iso,
+        isCurrentMonth: false
+      });
+    }
+
+    // Days in current month
+    for (let d = 1; d <= daysInMonth; d++) {
+      const iso = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      cells.push({
+        dayNumber: d,
+        dateKey: iso,
+        isCurrentMonth: true
+      });
+    }
+
+    // Trailing days from next month to complete grid rows of 7
+    const remaining = 7 - (cells.length % 7);
+    if (remaining < 7) {
+      for (let d = 1; d <= remaining; d++) {
+        const nextDate = new Date(calYear, calMonth + 1, d);
+        const iso = nextDate.toISOString().slice(0, 10);
+        cells.push({
+          dayNumber: d,
+          dateKey: iso,
+          isCurrentMonth: false
+        });
+      }
+    }
+
+    return cells;
+  }, [calYear, calMonth]);
+
+  const calMonthName = useMemo(() => {
+    const names = [
+      'janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
+      'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'
+    ];
+    return names[calMonth] || '';
+  }, [calMonth]);
+
+  const handlePrevCalMonth = () => {
+    if (calMonth === 0) {
+      setCalMonth(11);
+      setCalYear((y) => y - 1);
+    } else {
+      setCalMonth((m) => m - 1);
+    }
+  };
+
+  const handleNextCalMonth = () => {
+    if (calMonth === 11) {
+      setCalMonth(0);
+      setCalYear((y) => y + 1);
+    } else {
+      setCalMonth((m) => m + 1);
+    }
+  };
 
   // ============================================================================
   // PRINT / EXPORT A4 SHEET (FAITHFUL OFFICIAL DER/PR APPROVED LAYOUT)
@@ -1312,32 +1572,60 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
       )}
 
       {/* =========================================================================
-          FILTER INTERVAL & RDO PILL SELECTOR (MATCHING REFERENCE BEHAVIOR)
+          ITEM 1: FILTER INTERVAL WITH RAPID YEAR & MONTH SELECTORS
          ========================================================================= */}
       <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
-              <Building2 className="w-4 h-4 text-amber-500" />
-              <span className="text-xs font-bold text-slate-700">Obra:</span>
+          {/* Obra selector */}
+          <div className="flex items-center gap-2">
+            <Building2 className="w-4 h-4 text-amber-500" />
+            <span className="text-xs font-bold text-slate-700">Obra:</span>
+            <select
+              value={targetProjectId}
+              onChange={(e) => setTargetProjectId(e.target.value)}
+              className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-semibold bg-white"
+            >
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.code} — {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Quick Year & Month Selectors + Date Range */}
+          <div className="flex flex-wrap items-center gap-2.5">
+            <div className="flex items-center gap-1.5 text-xs text-slate-700 font-bold">
+              <span>Ano:</span>
               <select
-                value={targetProjectId}
-                onChange={(e) => setTargetProjectId(e.target.value)}
-                className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-semibold bg-white"
+                value={selectedYear}
+                onChange={(e) => handleYearFilterChange(e.target.value)}
+                className="border border-slate-300 rounded px-2 py-1 text-xs font-semibold bg-white"
               >
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.code} — {p.name}
+                <option value="ALL">Todos os Anos</option>
+                <option value="2026">2026</option>
+                <option value="2025">2025</option>
+                <option value="2024">2024</option>
+              </select>
+            </div>
+
+            <div className="flex items-center gap-1.5 text-xs text-slate-700 font-bold">
+              <span>Mês:</span>
+              <select
+                value={selectedMonth}
+                onChange={(e) => handleMonthFilterChange(e.target.value)}
+                className="border border-slate-300 rounded px-2 py-1 text-xs font-semibold bg-white"
+              >
+                {MONTHS_LIST.map((m) => (
+                  <option key={m.key} value={m.key}>
+                    {m.label}
                   </option>
                 ))}
               </select>
             </div>
-          </div>
 
-          {/* Date interval controls */}
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-1.5 text-xs text-slate-600">
-              <span className="font-bold">Período de:</span>
+            <div className="flex items-center gap-1.5 text-xs text-slate-600 border-l border-slate-200 pl-2">
+              <span className="font-bold">De:</span>
               <input
                 type="date"
                 value={fromDate}
@@ -1355,11 +1643,11 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
           </div>
         </div>
 
-        {/* Existing RDO Pills */}
+        {/* Existing RDO Pills Bar */}
         <div className="pt-2 border-t border-slate-100">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-              <Calendar className="w-3.5 h-3.5 text-emerald-600" />
+              <CalendarDays className="w-3.5 h-3.5 text-emerald-600" />
               RDOs cadastrados no intervalo ({filteredRdos.length}):
             </span>
             <span className="text-[11px] text-slate-400">
@@ -1368,8 +1656,8 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
           </div>
 
           {filteredRdos.length === 0 ? (
-            <div className="p-4 rounded-xl bg-slate-50 border border-dashed border-slate-300 text-center text-xs text-slate-500">
-              Nenhum RDO cadastrado neste intervalo de datas. Use o botão <strong>"Gerar RDOs em Lote"</strong> acima ou selecione uma data abaixo para criar individualmente.
+            <div className="p-3 rounded-xl bg-slate-50 border border-dashed border-slate-300 text-center text-xs text-slate-500">
+              Nenhum RDO cadastrado neste período. Utilize as opções de criação abaixo.
             </div>
           ) : (
             <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-1">
@@ -1407,11 +1695,12 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
       </div>
 
       {/* =========================================================================
-          CURRENT DATE SELECTOR BAR & RDO STATUS
+          ITEM 2: INTERACTIVE CUSTOM CALENDAR POPOVER & NAVIGATION
+          - Ponto colorido para dias com registro fotográfico (🟠)
+          - Destaque em verde para dias em que já foi gerado RDO (🟢)
          ========================================================================= */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3">
-        {/* Date Selector with quick previous/next day buttons */}
-        <div className="flex items-center gap-1.5 bg-slate-50 p-1 rounded-xl border border-slate-200">
+      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3 relative">
+        <div className="flex items-center gap-1.5 bg-slate-50 p-1 rounded-xl border border-slate-200 relative" ref={calendarRef}>
           <button
             type="button"
             onClick={() => handleShiftDate(-1)}
@@ -1421,15 +1710,16 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
             <ChevronLeft className="w-4 h-4" />
           </button>
 
-          <div className="flex items-center gap-1 px-2 font-bold text-xs text-slate-800">
-            <Calendar className="w-3.5 h-3.5 text-amber-500" />
-            <input
-              type="date"
-              value={currentDate}
-              onChange={(e) => setCurrentDate(e.target.value)}
-              className="bg-transparent border-none text-xs font-bold outline-none cursor-pointer"
-            />
-          </div>
+          {/* Date button that triggers the custom calendar */}
+          <button
+            type="button"
+            onClick={() => setCalendarOpen((v) => !v)}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg hover:bg-white text-xs font-bold text-slate-800 transition"
+            title="Abrir calendário interativo com marcações de fotos e RDOs"
+          >
+            <CalendarIcon className="w-4 h-4 text-amber-500" />
+            <span>{brDate(currentDate)}</span>
+          </button>
 
           <button
             type="button"
@@ -1447,9 +1737,121 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
           >
             Hoje
           </button>
+
+          {/* =====================================================================
+              CUSTOM CALENDAR POPOVER (POPUP COM MARCAÇÕES)
+             ===================================================================== */}
+          {calendarOpen && (
+            <div className="absolute top-full left-0 mt-2 z-50 w-72 bg-white rounded-2xl shadow-2xl border border-slate-200 p-3 space-y-2 animate-in fade-in zoom-in-95">
+              {/* Calendar Header with Month/Year Navigation */}
+              <div className="flex items-center justify-between pb-1 border-b border-slate-100">
+                <span className="text-xs font-black text-slate-900 capitalize">
+                  {calMonthName} de {calYear}
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={handlePrevCalMonth}
+                    className="p-1 rounded-md hover:bg-slate-100 text-slate-600"
+                    title="Mês Anterior"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleNextCalMonth}
+                    className="p-1 rounded-md hover:bg-slate-100 text-slate-600"
+                    title="Próximo Mês"
+                  >
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Weekday column headers */}
+              <div className="grid grid-cols-7 text-center font-bold text-[10px] text-slate-400">
+                <span>D</span>
+                <span>S</span>
+                <span>T</span>
+                <span>Q</span>
+                <span>Q</span>
+                <span>S</span>
+                <span>S</span>
+              </div>
+
+              {/* Days Grid */}
+              <div className="grid grid-cols-7 gap-1">
+                {calendarDays.map((cell, idx) => {
+                  const hasRdo = rdosMap.has(cell.dateKey);
+                  const photoCount = photoDatesMap.get(cell.dateKey) || 0;
+                  const hasPhotos = photoCount > 0;
+                  const isSelected = cell.dateKey === currentDate;
+
+                  return (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => {
+                        setCurrentDate(cell.dateKey);
+                        setCalendarOpen(false);
+                      }}
+                      title={`${brDate(cell.dateKey)}${hasRdo ? ' • RDO Gerado' : ''}${hasPhotos ? ` • ${photoCount} foto(s)` : ''}`}
+                      className={`h-8 rounded-lg flex flex-col items-center justify-center relative text-xs font-bold transition ${
+                        !cell.isCurrentMonth
+                          ? 'text-slate-300 hover:text-slate-500'
+                          : isSelected
+                          ? 'ring-2 ring-blue-500 font-black'
+                          : 'text-slate-700 hover:bg-slate-100'
+                      } ${
+                        hasRdo
+                          ? 'bg-emerald-100 text-emerald-900 border border-emerald-400 hover:bg-emerald-200'
+                          : ''
+                      }`}
+                    >
+                      <span className="leading-tight">{cell.dayNumber}</span>
+                      {/* Ponto indicador de Registro Fotográfico */}
+                      {hasPhotos && (
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full absolute bottom-1 ${
+                            hasRdo ? 'bg-amber-600' : 'bg-amber-500'
+                          }`}
+                        />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Legend Footer */}
+              <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-500">
+                <div className="flex items-center gap-2">
+                  <span className="flex items-center gap-1">
+                    <span className="w-2.5 h-2.5 rounded bg-emerald-100 border border-emerald-400 inline-block" />
+                    <span>RDO gerado</span>
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" />
+                    <span>Com fotos</span>
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleSetToday();
+                    setCalendarOpen(false);
+                  }}
+                  className="font-bold text-blue-600 hover:underline"
+                >
+                  Hoje
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* Status of this day's RDO */}
+        {/* =====================================================================
+            ITEM 3: APROVADO — STATUS BADGE & PHOTO COUNT (EXATAMENTE COMO NA FOTO 3)
+           ===================================================================== */}
         <div className="flex flex-wrap items-center gap-2">
           {dayExists ? (
             isLocked ? (
@@ -1469,8 +1871,8 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
             </span>
           )}
 
-          <span className="text-xs text-slate-500">
-            Fotos no dia: <strong className="text-slate-800">{rdoData.photos_count || 0}</strong>
+          <span className="text-xs text-slate-600">
+            Fotos no dia: <strong className="text-slate-900">{rdoData.photos_count || 0}</strong>
           </span>
 
           {dayExists && (
@@ -1537,23 +1939,28 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
       </div>
 
       {/* =========================================================================
-          IF NO RDO EXISTS FOR THIS DAY: INFORMATIVE PROMPT TO CREATE
+          ITEM 4: THREE CLEAR CREATION OPTIONS WHEN NO RDO EXISTS (FOTO 4)
+          a) Criar RDO para a data atual
+          b) Gerar RDO para todos os dias do período selecionado com fotos
+          c) Gerar RDO de todos os dias do período (para envio mensal completo)
          ========================================================================= */}
       {!dayExists && (
-        <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-xs text-center space-y-4">
+        <div className="bg-white p-6 sm:p-8 rounded-2xl border border-slate-200 shadow-xs text-center space-y-5">
           <div className="w-14 h-14 mx-auto rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600">
             <FileText className="w-7 h-7" />
           </div>
-          <div className="max-w-md mx-auto space-y-1">
+
+          <div className="max-w-xl mx-auto space-y-1">
             <h3 className="text-base font-bold text-slate-900">
               Nenhum Diário de Obras criado para {brDate(currentDate)}
             </h3>
             <p className="text-xs text-slate-500">
-              O sistema não cria RDOs fictícios automaticamente para dias vazios. Você pode criar a folha oficial para este dia com um clique:
+              O sistema não cria RDOs fictícios automaticamente para dias vazios. Escolha abaixo como deseja gerar:
             </p>
           </div>
 
-          <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl max-w-sm mx-auto text-xs text-slate-700 space-y-1">
+          {/* Details Card */}
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl max-w-lg mx-auto text-xs text-slate-700 space-y-1 text-left">
             <div>
               Fotos registradas nesta data: <strong>{rdoData.photos_count || 0} foto(s)</strong>
             </div>
@@ -1565,17 +1972,68 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
             <div>
               Próxima folha sequencial disponível: <strong>Folha Nº {rdoData.folio_number || 1}</strong>
             </div>
+            <div className="text-slate-500 pt-1 border-t border-slate-200 text-[11px]">
+              Período selecionado no filtro: <strong>{brDate(fromDate)}</strong> até <strong>{brDate(toDate)}</strong> ({totalDaysInPeriod} dias • {photoDatesInPeriod.length} com fotos)
+            </div>
           </div>
 
-          <div className="flex justify-center gap-3">
+          {/* Three Explicit Creation Buttons */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 max-w-3xl mx-auto pt-2">
+            {/* Opção A: Apenas a data selecionada */}
             <button
               type="button"
               onClick={handleCreateRdoForCurrentDate}
-              disabled={saving}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs shadow-xs transition"
+              disabled={saving || batchActionLoading}
+              className="p-4 rounded-xl border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-950 font-bold text-xs flex flex-col items-center justify-between gap-2 shadow-xs transition group text-center"
             >
-              <Plus className="w-4 h-4" />
-              {saving ? 'Criando...' : `Criar RDO para ${brDate(currentDate)} (Folha Nº ${rdoData.folio_number || 1})`}
+              <div className="flex items-center gap-1.5 text-emerald-700 font-black">
+                <Plus className="w-4 h-4" />
+                <span>Opção A: Criar Este Dia</span>
+              </div>
+              <p className="text-[11px] font-normal text-emerald-800">
+                Gera o RDO da Folha Nº {rdoData.folio_number || 1} apenas para {brDate(currentDate)}.
+              </p>
+              <span className="mt-1 px-3 py-1 rounded-lg bg-emerald-700 text-white text-[11px] font-bold group-hover:bg-emerald-800">
+                Criar RDO do Dia
+              </span>
+            </button>
+
+            {/* Opção B: Dias com fotos do período */}
+            <button
+              type="button"
+              onClick={handleGenerateRdoForPhotoDaysInPeriod}
+              disabled={saving || batchActionLoading}
+              className="p-4 rounded-xl border border-sky-300 bg-sky-50 hover:bg-sky-100 text-sky-950 font-bold text-xs flex flex-col items-center justify-between gap-2 shadow-xs transition group text-center"
+            >
+              <div className="flex items-center gap-1.5 text-sky-700 font-black">
+                <Sparkles className="w-4 h-4" />
+                <span>Opção B: Dias com Fotos</span>
+              </div>
+              <p className="text-[11px] font-normal text-sky-800">
+                Gera RDOs para todos os {photoDatesInPeriod.length} dias do período que possuem fotos registradas.
+              </p>
+              <span className="mt-1 px-3 py-1 rounded-lg bg-sky-700 text-white text-[11px] font-bold group-hover:bg-sky-800">
+                Gerar RDOs com Fotos
+              </span>
+            </button>
+
+            {/* Opção C: Todos os dias do período (completo com dias sem fotos) */}
+            <button
+              type="button"
+              onClick={handleGenerateCompleteRdoForEveryDayInPeriod}
+              disabled={saving || batchActionLoading}
+              className="p-4 rounded-xl border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-950 font-bold text-xs flex flex-col items-center justify-between gap-2 shadow-xs transition group text-center"
+            >
+              <div className="flex items-center gap-1.5 text-amber-800 font-black">
+                <FileStack className="w-4 h-4 text-amber-600" />
+                <span>Opção C: Período Completo</span>
+              </div>
+              <p className="text-[11px] font-normal text-amber-900">
+                Gera todas as folhas ({totalDaysInPeriod} dias), incluindo domingos e chuvas, para envio mensal completo.
+              </p>
+              <span className="mt-1 px-3 py-1 rounded-lg bg-amber-600 text-slate-950 text-[11px] font-bold group-hover:bg-amber-700 group-hover:text-white">
+                Gerar Período Completo
+              </span>
             </button>
           </div>
         </div>
@@ -1978,29 +2436,8 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
             </div>
 
             <p className="text-xs text-slate-600">
-              Cria automaticamente rascunhos de RDO para cada data com fotos cadastradas nesta obra. RDOs já existentes são preservados integralmente para manter suas edições.
+              Cria automaticamente rascunhos de RDO para o período filtrado ({brDate(fromDate)} até {brDate(toDate)}). RDOs já existentes são preservados integralmente.
             </p>
-
-            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5 text-xs text-slate-700">
-              <div className="font-semibold text-slate-900">
-                Datas com fotografias encontradas ({photoDatesSummary.length}):
-              </div>
-              <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
-                {photoDatesSummary.map((item) => (
-                  <span
-                    key={item.date}
-                    className={`px-2 py-0.5 rounded text-[11px] font-bold border ${
-                      item.has_rdo
-                        ? 'bg-slate-200 text-slate-700 border-slate-300'
-                        : 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                    }`}
-                    title={item.has_rdo ? 'Já possui RDO (será mantido)' : 'Novo RDO será criado'}
-                  >
-                    {brDate(item.date)} ({item.photo_count} fotos) {item.has_rdo ? '✓' : '+'}
-                  </span>
-                ))}
-              </div>
-            </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
               <div>
@@ -2083,7 +2520,7 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
                 onChange={(e) => setIncludeEmptyBatch(e.target.checked)}
                 className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
               />
-              Incluir também dias sem fotos no intervalo entre a primeira e a última data da obra
+              Incluir também dias sem fotos no intervalo do período (geração completa de todos os dias)
             </label>
 
             <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200">
@@ -2096,11 +2533,11 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
               </button>
               <button
                 type="button"
-                onClick={handleExecuteBatch}
+                onClick={handleExecuteBatchModal}
                 disabled={batchLoading}
                 className="px-5 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold shadow-xs transition disabled:opacity-50"
               >
-                {batchLoading ? 'Gerando Lote...' : 'Criar Rascunhos da Obra'}
+                {batchLoading ? 'Gerando Lote...' : 'Criar Rascunhos do Período'}
               </button>
             </div>
           </div>
