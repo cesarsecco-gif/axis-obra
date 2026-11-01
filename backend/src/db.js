@@ -170,10 +170,32 @@ function initDatabase() {
       sort_order INTEGER DEFAULT 0,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS report_settings (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      orientation TEXT DEFAULT 'PORTRAIT',
+      photos_per_page INTEGER DEFAULT 6,
+      banner_mode TEXT DEFAULT 'TEXT',
+      banner_image_url TEXT DEFAULT '',
+      banner_text TEXT DEFAULT 'AXIS OBRA ENGENHARIA E CONSTRUÇÕES LTDA\nRELATÓRIO FOTOGRÁFICO DE ACOMPANHAMENTO DE OBRA',
+      banner_text_align TEXT DEFAULT 'CENTER',
+      banner_font_size TEXT DEFAULT 'MEDIUM',
+      banner_bold INTEGER DEFAULT 1,
+      banner_italic INTEGER DEFAULT 0,
+      banner_underline INTEGER DEFAULT 0,
+      banner_color TEXT DEFAULT '#0f172a',
+      subheader_text TEXT DEFAULT '',
+      subheader_align TEXT DEFAULT 'CENTER',
+      subheader_bold INTEGER DEFAULT 1,
+      footer_text TEXT DEFAULT 'Contrato n. 001/2026 — AXIS OBRA',
+      show_empty_placeholders INTEGER DEFAULT 1,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
   `);
 
   ensureSamplePhotos();
   seedOccurrenceParamsIfEmpty();
+  seedReportSettingsIfEmpty();
   seedIfEmpty();
 }
 
@@ -336,6 +358,28 @@ function seedOccurrenceParamsIfEmpty() {
   [...defaultTypes, ...defaultSeverities, ...defaultStatuses, ...defaultSectors].forEach((row) => {
     insertParam.run(...row);
   });
+}
+
+function seedReportSettingsIfEmpty() {
+  const row = db.prepare('SELECT id FROM report_settings WHERE id = 1').get();
+  if (row) return;
+
+  db.prepare(`
+    INSERT INTO report_settings (
+      id, orientation, photos_per_page, banner_mode, banner_image_url,
+      banner_text, banner_text_align, banner_font_size, banner_bold,
+      banner_italic, banner_underline, banner_color,
+      subheader_text, subheader_align, subheader_bold,
+      footer_text, show_empty_placeholders
+    )
+    VALUES (
+      1, 'PORTRAIT', 6, 'TEXT', '',
+      'AXIS OBRA ENGENHARIA E CONSTRUÇÕES LTDA\nSUPERINTENDÊNCIA DE ENGENHARIA E CONTROLE DE QUALIDADE',
+      'CENTER', 'MEDIUM', 1, 0, 0, '#0f172a',
+      '', 'CENTER', 1,
+      'Contrato n. CO141/2026 - DT', 1
+    )
+  `).run();
 }
 
 function seedIfEmpty() {

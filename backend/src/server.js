@@ -942,8 +942,96 @@ app.delete('/api/equipments/:id', authenticate, (req, res) => {
 });
 
 // ============================================================================
-// 5. REGISTRO FOTOGRÁFICO (MÓDULO 1)
+// 5. REGISTRO FOTOGRÁFICO E CONFIGURAÇÃO DE RELATÓRIO (MÓDULO 1)
 // ============================================================================
+
+app.get('/api/report-settings', authenticate, (_req, res) => {
+  const row = db.prepare('SELECT * FROM report_settings WHERE id = 1').get();
+  res.json(row || {});
+});
+
+app.put('/api/report-settings', authenticate, upload.single('banner_file'), (req, res) => {
+  const existing = db.prepare('SELECT * FROM report_settings WHERE id = 1').get();
+  const {
+    orientation,
+    photos_per_page,
+    banner_mode,
+    banner_image_base64,
+    banner_image_url,
+    banner_text,
+    banner_text_align,
+    banner_font_size,
+    banner_bold,
+    banner_italic,
+    banner_underline,
+    banner_color,
+    subheader_text,
+    subheader_align,
+    subheader_bold,
+    footer_text,
+    show_empty_placeholders
+  } = req.body;
+
+  let finalBannerUrl =
+    banner_image_url !== undefined ? banner_image_url : existing?.banner_image_url || '';
+
+  if (req.file) {
+    finalBannerUrl = `/uploads/${req.file.filename}`;
+  } else if (banner_image_base64 && banner_image_base64.startsWith('data:image/')) {
+    const matches = banner_image_base64.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/);
+    if (matches) {
+      let ext = matches[1].toLowerCase();
+      if (ext === 'jpeg') ext = 'jpg';
+      if (ext === 'svg+xml') ext = 'svg';
+      const filename = `banner-relatorio-${Date.now()}.${ext}`;
+      const filePath = path.join(uploadsDir, filename);
+      fs.writeFileSync(filePath, Buffer.from(matches[2], 'base64'));
+      finalBannerUrl = `/uploads/${filename}`;
+    }
+  }
+
+  db.prepare(`
+    UPDATE report_settings
+    SET orientation = ?,
+        photos_per_page = ?,
+        banner_mode = ?,
+        banner_image_url = ?,
+        banner_text = ?,
+        banner_text_align = ?,
+        banner_font_size = ?,
+        banner_bold = ?,
+        banner_italic = ?,
+        banner_underline = ?,
+        banner_color = ?,
+        subheader_text = ?,
+        subheader_align = ?,
+        subheader_bold = ?,
+        footer_text = ?,
+        show_empty_placeholders = ?,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = 1
+  `).run(
+    orientation || existing.orientation || 'PORTRAIT',
+    Number(photos_per_page) || existing.photos_per_page || 6,
+    banner_mode || existing.banner_mode || 'TEXT',
+    finalBannerUrl,
+    banner_text !== undefined ? banner_text : existing.banner_text,
+    banner_text_align || existing.banner_text_align || 'CENTER',
+    banner_font_size || existing.banner_font_size || 'MEDIUM',
+    banner_bold !== undefined ? (banner_bold ? 1 : 0) : existing.banner_bold,
+    banner_italic !== undefined ? (banner_italic ? 1 : 0) : existing.banner_italic,
+    banner_underline !== undefined ? (banner_underline ? 1 : 0) : existing.banner_underline,
+    banner_color || existing.banner_color || '#0f172a',
+    subheader_text !== undefined ? subheader_text : existing.subheader_text,
+    subheader_align || existing.subheader_align || 'CENTER',
+    subheader_bold !== undefined ? (subheader_bold ? 1 : 0) : existing.subheader_bold,
+    footer_text !== undefined ? footer_text : existing.footer_text,
+    show_empty_placeholders !== undefined ? (show_empty_placeholders ? 1 : 0) : existing.show_empty_placeholders
+  );
+
+  const updated = db.prepare('SELECT * FROM report_settings WHERE id = 1').get();
+  res.json(updated);
+});
 
 app.get('/api/photos', authenticate, (req, res) => {
   const { projectId, stage } = req.query;

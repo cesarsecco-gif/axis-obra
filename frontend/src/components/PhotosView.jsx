@@ -23,9 +23,12 @@ import {
   Images,
   ArrowUpDown,
   ArrowDown,
-  ArrowUp
+  ArrowUp,
+  FileText,
+  FileSpreadsheet
 } from 'lucide-react';
 import { apiRequest, formatDateBR } from '../api';
+import PhotoReportModal from './PhotoReportModal';
 
 const STAGES = [
   { value: 'TERRAPLANAGEM', label: 'Terraplanagem', color: 'bg-amber-100 text-amber-800 border-amber-300' },
@@ -84,6 +87,7 @@ export default function PhotosView({ projects, selectedProjectId, onRefreshDashb
 
   // Modal & Edit States
   const [showModal, setShowModal] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
   const [editingPhoto, setEditingPhoto] = useState(null);
   const [lightboxPhoto, setLightboxPhoto] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -691,13 +695,24 @@ export default function PhotosView({ projects, selectedProjectId, onRefreshDashb
           </p>
         </div>
 
-        <button
-          onClick={openCreateModal}
-          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-semibold text-sm shadow-sm transition"
-        >
-          <Plus className="w-4 h-4" />
-          Novo Registro Fotográfico (Individual ou Lote)
-        </button>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            type="button"
+            onClick={() => setShowReportModal(true)}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-amber-400 font-semibold text-sm shadow-sm transition border border-slate-800"
+          >
+            <FileText className="w-4 h-4" />
+            Relatório Fotográfico (PDF / Excel)
+          </button>
+
+          <button
+            onClick={openCreateModal}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-semibold text-sm shadow-sm transition"
+          >
+            <Plus className="w-4 h-4" />
+            Novo Registro Fotográfico (Individual ou Lote)
+          </button>
+        </div>
       </div>
 
       {/* Filters & Period Grouping Bar */}
@@ -1426,6 +1441,17 @@ export default function PhotosView({ projects, selectedProjectId, onRefreshDashb
           </div>
         </div>
       )}
+
+      {/* Report Configuration & Export Modal (PDF / Excel) */}
+      <PhotoReportModal
+        isOpen={showReportModal}
+        onClose={() => setShowReportModal(false)}
+        photos={filteredPhotos}
+        projects={projects}
+        selectedProjectId={selectedProjectId}
+        yearFilter={yearFilter}
+        monthFilter={monthFilter}
+      />
     </div>
   );
 }
