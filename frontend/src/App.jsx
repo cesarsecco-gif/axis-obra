@@ -11,6 +11,7 @@ import {
   Settings,
   LogOut,
   UserCheck,
+  UserCog,
   Menu,
   X,
   KeyRound,
@@ -24,7 +25,8 @@ import {
   getStoredImpersonator,
   setAuthSession,
   clearAuthSession,
-  UNAUTHORIZED_EVENT
+  UNAUTHORIZED_EVENT,
+  can
 } from './api';
 import LoginView from './components/LoginView';
 import ChangePasswordModal from './components/ChangePasswordModal';
@@ -39,6 +41,7 @@ const EquipmentsView = lazy(() => import('./components/EquipmentsView'));
 const ProjectsUsersView = lazy(() => import('./components/ProjectsUsersView'));
 const PluviometryView = lazy(() => import('./components/PluviometryView'));
 const SettingsView = lazy(() => import('./components/SettingsView'));
+const AccountsView = lazy(() => import('./components/AccountsView'));
 
 const NAV_ITEMS = [
   { id: 'DASHBOARD', label: 'Painel Consolidado', icon: LayoutDashboard, badge: null },
@@ -47,9 +50,10 @@ const NAV_ITEMS = [
   { id: 'OCCURRENCES', label: '3. Registro de Ocorrências', icon: AlertTriangle, badge: 'Módulo 3' },
   { id: 'EMPLOYEES', label: '4. Cadastro de Funcionários', icon: HardHat, badge: 'Módulo 4' },
   { id: 'EQUIPMENTS', label: '5. Cadastro de Equipamentos', icon: Wrench, badge: 'Módulo 5' },
-  { id: 'PROJECTS', label: '6. Obras por Usuário', icon: Building2, badge: 'Módulo 6' },
+  { id: 'PROJECTS', label: '6. Gestão de Obras', icon: Building2, badge: 'Módulo 6' },
   { id: 'PLUVIOMETRY', label: '7. Registro de Pluviometria', icon: CloudRain, badge: 'Módulo 7' },
-  { id: 'SETTINGS', label: '8. Configurações do Sistema', icon: Settings, badge: 'Ajustes' }
+  { id: 'SETTINGS', label: '8. Configurações do Sistema', icon: Settings, badge: 'Ajustes' },
+  { id: 'ACCOUNTS', label: '9. Gestão de Contas', icon: UserCog, badge: 'Módulo 9' }
 ];
 
 export default function App() {
@@ -69,7 +73,7 @@ export default function App() {
         const targetProj = projectIdOverride !== undefined ? projectIdOverride : selectedProjectId;
         const [projList, dash] = await Promise.all([
           apiRequest('/api/projects'),
-          apiRequest(`/api/dashboard?projectId=${targetProj}`)
+          can(currentUser, 'DASHBOARD') ? apiRequest(`/api/dashboard?projectId=${targetProj}`) : Promise.resolve(null)
         ]);
         setProjects(projList);
         setDashboardData(dash);
@@ -160,6 +164,13 @@ export default function App() {
     return <LoginView onLoggedIn={(res) => applySession(res, null)} />;
   }
 
+  // Módulos que o perfil de acesso permite ver
+  const visibleNav = NAV_ITEMS.filter((item) => can(currentUser, item.id));
+  const currentNav = visibleNav.some((i) => i.id === activeNav) ? activeNav : visibleNav[0]?.id;
+  const roleLabel = currentUser.role_info?.name || currentUser.role;
+  const allProjectsAccess = currentUser.permissions === 'ALL' || currentUser.role_info?.scope === 'ALL';
+  const mustChangePassword = Boolean(currentUser.must_change_password) && !impersonator;
+
   const moduleFallback = (
     <div className="p-10 text-center text-sm text-slate-500 font-semibold">Carregando módulo...</div>
   );
@@ -185,7 +196,7 @@ export default function App() {
         <div className="p-4 mx-3 mt-4 rounded-xl bg-slate-900 border border-slate-800">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
-              {currentUser.role}
+              {roleLabel}
             </span>
             <span className="text-[11px] text-emerald-400 flex items-center gap-1">
               <CheckCircle2 className="w-3 h-3" /> Online
@@ -194,7 +205,7 @@ export default function App() {
           <p className="font-bold text-sm text-white mt-2 truncate">{currentUser.name}</p>
           <p className="text-xs text-slate-400 truncate">{currentUser.email}</p>
           <p className="text-[11px] text-amber-400/90 mt-1.5 font-medium">
-            {currentUser.role === 'ADMIN'
+            {allProjectsAccess
               ? `Acesso Global (${projects.length} obras)`
               : `${projects.length} obra(s) vinculada(s) ao usuário`}
           </p>
@@ -202,9 +213,9 @@ export default function App() {
 
         {/* Navigation Links */}
         <nav className="flex-1 px-3 py-4 space-y-1">
-          {NAV_ITEMS.map((item) => {
+          {visibleNav.map((item) => {
             const Icon = item.icon;
-            const active = activeNav === item.id;
+            const active = currentNav === item.id;
             return (
               <button
                 key={item.id}
@@ -277,7 +288,7 @@ export default function App() {
                       AXIS OBRA
                     </h1>
                     <span className="text-[10px] text-amber-600 font-bold block mt-0.5">
-                      {NAV_ITEMS.find((i) => i.id === activeNav)?.label || 'Painel'}
+                      {NAV_ITEMS.find((i) => i.id === currentNav)?.label || 'Painel'}
                     </span>
                   </div>
                 </div>
@@ -330,7 +341,7 @@ export default function App() {
           <div className="bg-amber-100 border-b border-amber-300 px-3 sm:px-6 lg:px-8 py-2 flex flex-wrap items-center justify-between gap-2 text-xs text-amber-900">
             <span className="flex items-center gap-2 font-semibold">
               <Eye className="w-4 h-4" />
-              Simulando o acesso de {currentUser.name} ({currentUser.role}). Você vê exatamente o que este usuário vê.
+              Simulando o acesso de {currentUser.name} ({roleLabel}). Você vê exatamente o que este usuário vê.
             </span>
             <button
               onClick={handleStopImpersonation}
@@ -375,7 +386,7 @@ export default function App() {
                 <div className="p-3.5 mx-3 mt-3 rounded-xl bg-slate-900 border border-slate-800">
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                      {currentUser.role}
+                      {roleLabel}
                     </span>
                     <span className="text-[11px] text-emerald-400 flex items-center gap-1">
                       <CheckCircle2 className="w-3 h-3" /> Online
@@ -384,7 +395,7 @@ export default function App() {
                   <p className="font-bold text-sm text-white mt-1.5 truncate">{currentUser.name}</p>
                   <p className="text-xs text-slate-400 truncate">{currentUser.email}</p>
                   <p className="text-[11px] text-amber-400/90 mt-1 font-medium">
-                    {currentUser.role === 'ADMIN'
+                    {allProjectsAccess
                       ? `Acesso Global (${projects.length} obras)`
                       : `${projects.length} obra(s) vinculada(s)`}
                   </p>
@@ -392,9 +403,9 @@ export default function App() {
 
                 {/* Navigation Links */}
                 <nav className="px-3 py-3 space-y-1">
-                  {NAV_ITEMS.map((item) => {
+                  {visibleNav.map((item) => {
                     const Icon = item.icon;
-                    const active = activeNav === item.id;
+                    const active = currentNav === item.id;
                     return (
                       <button
                         key={item.id}
@@ -455,7 +466,7 @@ export default function App() {
         {/* Page Body */}
         <main className="flex-1 p-3 sm:p-5 lg:p-8 pb-24 lg:pb-8 max-w-7xl w-full mx-auto min-w-0">
           <Suspense fallback={moduleFallback}>
-          {activeNav === 'DASHBOARD' && (
+          {currentNav === 'DASHBOARD' && (
             <DashboardView
               dashboard={dashboardData}
               currentUser={currentUser}
@@ -464,7 +475,7 @@ export default function App() {
             />
           )}
 
-          {activeNav === 'PHOTOS' && (
+          {currentNav === 'PHOTOS' && (
             <PhotosView
               projects={projects}
               selectedProjectId={selectedProjectId}
@@ -472,7 +483,7 @@ export default function App() {
             />
           )}
 
-          {activeNav === 'RDO' && (
+          {currentNav === 'RDO' && (
             <RdoView
               projects={projects}
               selectedProjectId={selectedProjectId}
@@ -480,7 +491,7 @@ export default function App() {
             />
           )}
 
-          {activeNav === 'OCCURRENCES' && (
+          {currentNav === 'OCCURRENCES' && (
             <OccurrencesView
               projects={projects}
               selectedProjectId={selectedProjectId}
@@ -489,7 +500,7 @@ export default function App() {
             />
           )}
 
-          {activeNav === 'EMPLOYEES' && (
+          {currentNav === 'EMPLOYEES' && (
             <EmployeesView
               projects={projects}
               selectedProjectId={selectedProjectId}
@@ -497,7 +508,7 @@ export default function App() {
             />
           )}
 
-          {activeNav === 'EQUIPMENTS' && (
+          {currentNav === 'EQUIPMENTS' && (
             <EquipmentsView
               projects={projects}
               selectedProjectId={selectedProjectId}
@@ -505,15 +516,20 @@ export default function App() {
             />
           )}
 
-          {activeNav === 'PROJECTS' && (
-            <ProjectsUsersView
+          {currentNav === 'PROJECTS' && (
+            <ProjectsUsersView currentUser={currentUser} onProjectsUpdated={() => loadWorkspaceData()} />
+          )}
+
+          {currentNav === 'ACCOUNTS' && (
+            <AccountsView
               currentUser={currentUser}
-              onProjectsUpdated={() => loadWorkspaceData()}
-              onSwitchUser={impersonator ? null : (uid) => handleImpersonate(uid)}
+              projects={projects}
+              onImpersonate={impersonator ? null : (uid) => handleImpersonate(uid)}
+              onAccountsChanged={() => loadWorkspaceData()}
             />
           )}
 
-          {activeNav === 'PLUVIOMETRY' && (
+          {currentNav === 'PLUVIOMETRY' && (
             <PluviometryView
               projects={projects}
               selectedProjectId={selectedProjectId}
@@ -521,7 +537,7 @@ export default function App() {
             />
           )}
 
-          {activeNav === 'SETTINGS' && (
+          {currentNav === 'SETTINGS' && (
             <SettingsView
               projects={projects}
               selectedProjectId={selectedProjectId}
@@ -531,7 +547,19 @@ export default function App() {
           </Suspense>
         </main>
 
-        {showPasswordModal && <ChangePasswordModal onClose={() => setShowPasswordModal(false)} />}
+        {(showPasswordModal || mustChangePassword) && (
+          <ChangePasswordModal
+            forced={mustChangePassword}
+            onClose={() => setShowPasswordModal(false)}
+            onChanged={() => {
+              // Mantém a janela aberta mostrando a confirmação
+              setShowPasswordModal(true);
+              const updated = { ...currentUser, must_change_password: 0 };
+              setAuthSession(null, updated, getStoredImpersonator());
+              setCurrentUser(updated);
+            }}
+          />
+        )}
 
         {/* Mobile & Tablet Fixed Bottom Quick-Access Bar */}
         <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-950/95 backdrop-blur-md border-t border-slate-800 px-2 py-1.5 flex items-center justify-around shadow-2xl">
@@ -540,9 +568,11 @@ export default function App() {
             { id: 'PHOTOS', label: 'Fotos', icon: Camera },
             { id: 'RDO', label: 'RDO', icon: ClipboardList },
             { id: 'PLUVIOMETRY', label: 'Chuvas', icon: CloudRain }
-          ].map((item) => {
+          ]
+            .filter((item) => can(currentUser, item.id))
+            .map((item) => {
             const Icon = item.icon;
-            const active = activeNav === item.id;
+            const active = currentNav === item.id;
             return (
               <button
                 key={item.id}

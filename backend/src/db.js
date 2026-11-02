@@ -2,6 +2,7 @@ const { DatabaseSync } = require('node:sqlite');
 const path = require('node:path');
 const fs = require('node:fs');
 const crypto = require('node:crypto');
+const { SYSTEM_ROLES, normalizePermissions } = require('./permissions');
 
 const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, '..', 'data');
 const uploadsDir = process.env.UPLOADS_DIR
@@ -284,6 +285,19 @@ function initDatabase() {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
     );
 
+    CREATE TABLE IF NOT EXISTS roles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      key TEXT UNIQUE NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      color TEXT DEFAULT '#475569',
+      scope TEXT DEFAULT 'LINKED',
+      is_system INTEGER DEFAULT 0,
+      permissions TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS auth_codes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER NOT NULL,
@@ -302,6 +316,9 @@ function initDatabase() {
   ensureReportSettingsColumns();
   ensureRdoColumns();
   ensureOccurrenceColumns();
+  ensureUserColumns();
+  ensureProjectUserColumns();
+  ensureSystemRoles();
   migrateRdoStatus();
   ensureRdoFolioIndex();
   seedOccurrenceParamsIfEmpty();
@@ -329,6 +346,65 @@ function ensureMainAdmin() {
     "INSERT INTO users (name, email, password_hash, role, active) VALUES (?, ?, ?, 'ADMIN', 1)"
   ).run(MAIN_ADMIN_NAME, MAIN_ADMIN_EMAIL, hashPassword(MAIN_ADMIN_INITIAL_PASSWORD));
   console.log(`Administrador principal criado: ${MAIN_ADMIN_EMAIL}`);
+}
+
+// Cadastro completo da conta (Módulo 9 — Gestão de Contas)
+function ensureUserColumns() {
+  const cols = db.prepare("PRAGMA table_info('users')").all().map((c) => c.name);
+  const additions = [
+    ['display_name', "TEXT DEFAULT ''"],
+    ['cpf', "TEXT DEFAULT ''"],
+    ['birth_date', "TEXT DEFAULT ''"],
+    ['phone_alt', "TEXT DEFAULT ''"],
+    ['employment_type', "TEXT DEFAULT 'PROPRIO'"],
+    ['company', "TEXT DEFAULT ''"],
+    ['job_title', "TEXT DEFAULT ''"],
+    ['registration_number', "TEXT DEFAULT ''"],
+    ['council', "TEXT DEFAULT ''"],
+    ['council_number', "TEXT DEFAULT ''"],
+    ['council_uf', "TEXT DEFAULT ''"],
+    ['access_expires_at', "TEXT DEFAULT ''"],
+    ['avatar_url', "TEXT DEFAULT ''"],
+    ['signature_url', "TEXT DEFAULT ''"],
+    ['notes', "TEXT DEFAULT ''"],
+    ['invite_pending', 'INTEGER DEFAULT 0'],
+    ['must_change_password', 'INTEGER DEFAULT 0'],
+    ['last_login_at', "TEXT DEFAULT ''"]
+  ];
+  for (const [colName, colDef] of additions) {
+    if (!cols.includes(colName)) db.exec(`ALTER TABLE users ADD COLUMN ${colName} ${colDef};`);
+  }
+}
+
+function ensureProjectUserColumns() {
+  const cols = db.prepare("PRAGMA table_info('project_users')").all().map((c) => c.name);
+  if (!cols.includes('since_date')) db.exec("ALTER TABLE project_users ADD COLUMN since_date TEXT DEFAULT '';");
+}
+
+// Perfis padrão: criados se não existirem. Ajustes feitos pelo usuário são preservados.
+function ensureSystemRoles() {
+  const insert = db.prepare(
+    'INSERT INTO roles (key, name, description, color, scope, is_system, permissions) VALUES (?, ?, ?, ?, ?, 1, ?)'
+  );
+  for (const r of SYSTEM_ROLES) {
+    const existing = db.prepare('SELECT id, permissions FROM roles WHERE key = ?').get(r.key);
+    if (!existing) {
+      insert.run(r.key, r.name, r.description, r.color, r.scope, JSON.stringify(r.permissions));
+    } else {
+      // Completa módulos/ações novos sem apagar o que já foi configurado
+      let current = {};
+      try {
+        current = JSON.parse(existing.permissions || '{}');
+      } catch {
+        current = {};
+      }
+      const merged = normalizePermissions({ ...r.permissions, ...current });
+      db.prepare('UPDATE roles SET permissions = ? WHERE id = ?').run(JSON.stringify(merged), existing.id);
+    }
+  }
+  // O Administrador é sempre acesso total
+  const admin = SYSTEM_ROLES.find((r) => r.key === 'ADMIN');
+  db.prepare("UPDATE roles SET permissions = ?, scope = 'ALL' WHERE key = 'ADMIN'").run(JSON.stringify(admin.permissions));
 }
 
 // Status antigos do RDO (ex.: EM_ANDAMENTO) passam a ser 'draft'.

@@ -57,11 +57,21 @@ Implementado na branch `claude/finish-repository-l1vcze`. Os itens das seções 
 | **Novo:** administrador principal | ✅ | `cesarsecco@gmail.com`, senha inicial `123456` (configurável por `ADMIN_*`) |
 | **Novo:** simular acesso seguro | ✅ | `impersonate` / `stop-impersonation` (só ADMIN; faixa de aviso e botão de voltar) |
 
+### Implementado depois (aprovado em 02/11/2026)
+
+| Item | O que foi feito |
+|---|---|
+| Perfis de acesso configuráveis | Tabela `roles`; aba Configurações › Perfis de Acesso (criar, duplicar, editar, excluir; cor; abrangência; Ver/Criar/Editar/Excluir por módulo; ações especiais; modelos prontos). Servidor confere em todas as rotas (`backend/src/permissions.js`). |
+| Módulo 9 — Gestão de Contas | Lista com indicadores e filtros; cadastro completo (dados pessoais, contato, profissionais, acesso, obras com função, foto, assinatura); convite por e-mail com link (7 dias) ou senha inicial com troca obrigatória; validade do acesso; reenviar convite; simular acesso; redefinir senha. |
+| Módulo 6 | Renomeado para "Gestão de Obras": obras + equipe por obra. Cadastro de usuários saiu dele. |
+| Custos | Sem "ver custos", diárias e custos de equipamentos não são enviados ao navegador e não podem ser alterados. |
+| Testes | 26 testes de API (`npm test`). |
+
 ### Pendências após esta revisão
 1. **Contas de demonstração com senha `123456`** (`admin@axisobra.com.br`, `mariana@`, `roberto@`, `joao@`) continuam existindo em bancos já criados e em instalações novas. `admin@axisobra.com.br` é ADMIN. **Desativar em produção** (Obras por Usuário → Editar → Desativar) ou trocar as senhas.
 2. Configurar **SMTP** em produção (sem ele, login por código e "Esqueci minha senha" ficam ocultos).
 3. Trocar a senha inicial do administrador principal.
-4. Ocultar na tela os botões que o perfil não pode usar (FISCAL, ENCARREGADO no RDO).
+4. Ocultar na tela os botões que o perfil não pode usar: já feito no RDO, Ocorrências, Gestão de Obras, Configurações e Gestão de Contas; falta em Fotos, Funcionários, Equipamentos e Pluviometria (o servidor já recusa com mensagem).
 5. O Módulo 1 ainda aceita SVG no upload multipart (usado pelo gerador de carimbo de demonstração); está neutralizado pelo CSP `sandbox`, mas pode ser restrito quando o gerador for removido.
 6. Q2–Q6: ESLint/Prettier, separar `server.js` em rotas, dividir componentes grandes, fixar versão do Node na imagem Docker, revisar dados de seed.
 7. Ativar o workflow (copiar `deploy/github-actions-deploy.yml` para `.github/workflows/`).

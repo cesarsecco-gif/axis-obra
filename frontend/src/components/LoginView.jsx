@@ -68,6 +68,7 @@ export default function LoginView({ onLoggedIn }) {
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [loading, setLoading] = useState(false);
+  const [isInvite, setIsInvite] = useState(false);
   const emailGuard = useNoAutofill();
   const passwordGuard = useNoAutofill();
 
@@ -75,10 +76,21 @@ export default function LoginView({ onLoggedIn }) {
     apiRequest('/api/auth/options')
       .then((opts) => setEmailCodeEnabled(Boolean(opts.emailCodeEnabled)))
       .catch(() => setEmailCodeEnabled(false));
+
+    // Link do convite de nova conta: ?convite=1&email=...&codigo=...
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('convite') && params.get('email')) {
+      setMode('RESET');
+      setIsInvite(true);
+      setEmail(params.get('email'));
+      setCode((params.get('codigo') || '').replace(/\D/g, '').slice(0, 6));
+      setCodeSent(true);
+    }
   }, []);
 
   const switchMode = (next) => {
     setMode(next);
+    setIsInvite(false);
     setError('');
     setInfo('');
     setCode('');
@@ -146,6 +158,10 @@ export default function LoginView({ onLoggedIn }) {
         method: 'POST',
         body: JSON.stringify({ email, code, newPassword })
       });
+      if (isInvite) {
+        window.history.replaceState({}, '', window.location.pathname);
+        setIsInvite(false);
+      }
       switchMode('PASSWORD');
       setInfo(res.message || 'Senha alterada com sucesso. Faça login com a nova senha.');
     });
@@ -193,6 +209,7 @@ export default function LoginView({ onLoggedIn }) {
     </div>
   );
 
+  const inviteTitle = { title: 'Criar sua senha', subtitle: 'Bem-vindo ao AXIS OBRA! Crie a senha que você vai usar para entrar.' };
   const titles = {
     PASSWORD: { title: 'Acessar o Sistema', subtitle: 'Entre com seu e-mail e senha.' },
     CODE: { title: 'Entrar com código', subtitle: 'Enviaremos um código de 6 dígitos para o seu e-mail.' },
@@ -258,8 +275,8 @@ export default function LoginView({ onLoggedIn }) {
                 <ArrowLeft className="w-3.5 h-3.5" /> Voltar para login com senha
               </button>
             )}
-            <h2 className="text-2xl font-bold text-white">{titles[mode].title}</h2>
-            <p className="text-xs text-slate-400 mt-1">{titles[mode].subtitle}</p>
+            <h2 className="text-2xl font-bold text-white">{(isInvite ? inviteTitle : titles[mode]).title}</h2>
+            <p className="text-xs text-slate-400 mt-1">{(isInvite ? inviteTitle : titles[mode]).subtitle}</p>
           </div>
 
           {error && (

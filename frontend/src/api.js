@@ -67,7 +67,19 @@ export async function apiRequest(path, options = {}) {
   return data;
 }
 
+// Permissões do perfil de acesso do usuário logado.
+// action: 'view' | 'create' | 'edit' | 'delete' | nome da ação especial (ex.: 'finalize')
+export function can(user, moduleKey, action = 'view') {
+  if (!user) return false;
+  if (user.permissions === 'ALL') return true;
+  const mod = user.permissions && user.permissions[moduleKey];
+  if (!mod || !mod.view) return false;
+  if (['view', 'create', 'edit', 'delete'].includes(action)) return Boolean(mod[action]);
+  return Boolean(mod.special && mod.special[action]);
+}
+
 export function formatCurrency(value) {
+  if (value === null || value === undefined) return '—';
   return new Intl.NumberFormat('pt-BR', {
     style: 'currency',
     currency: 'BRL'

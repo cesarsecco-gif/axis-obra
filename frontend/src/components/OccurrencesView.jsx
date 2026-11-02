@@ -36,7 +36,7 @@ import {
   Filter,
   CheckSquare
 } from 'lucide-react';
-import { apiRequest, formatDateBR } from '../api';
+import { apiRequest, formatDateBR, can } from '../api';
 
 const COLOR_PALETTE = {
   slate: {
@@ -173,6 +173,12 @@ async function readFileAsDataURL(file) {
 }
 
 export default function OccurrencesView({ projects, selectedProjectId, currentUser, onRefreshDashboard }) {
+  // Permissões do perfil de acesso (o servidor também confere)
+  const canCreateOcc = can(currentUser, 'OCCURRENCES', 'create');
+  const canEditOcc = can(currentUser, 'OCCURRENCES', 'edit');
+  const canDeleteOcc = can(currentUser, 'OCCURRENCES', 'delete');
+  const canChangeStatus = can(currentUser, 'OCCURRENCES', 'change_status');
+  const canEditFields = can(currentUser, 'SETTINGS', 'edit');
   const [activeView, setActiveView] = useState('LIST'); // 'LIST' | 'REPORT' | 'PARAMS'
   const [occurrences, setOccurrences] = useState([]);
   const [paramsList, setParamsList] = useState([]);
@@ -1136,6 +1142,7 @@ export default function OccurrencesView({ projects, selectedProjectId, currentUs
               <FileText className="w-3.5 h-3.5" />
               Relatórios por Status
             </button>
+            {canEditFields && (
             <button
               type="button"
               onClick={() => setActiveView('PARAMS')}
@@ -1148,8 +1155,10 @@ export default function OccurrencesView({ projects, selectedProjectId, currentUs
               <Settings className="w-3.5 h-3.5" />
               Gerenciar Campos
             </button>
+            )}
           </div>
 
+          {canCreateOcc && (
           <button
             onClick={openCreateModal}
             className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-semibold text-sm shadow-sm transition"
@@ -1157,6 +1166,7 @@ export default function OccurrencesView({ projects, selectedProjectId, currentUs
             <Plus className="w-4 h-4" />
             Registrar Ocorrência
           </button>
+          )}
         </div>
       </div>
 
@@ -2359,6 +2369,7 @@ export default function OccurrencesView({ projects, selectedProjectId, currentUs
                       {/* Quick Actions */}
                       <div className="flex lg:flex-col items-center lg:items-end justify-between gap-2 shrink-0 border-t lg:border-t-0 pt-3 lg:pt-0 border-slate-100">
                         <div className="flex flex-wrap items-center gap-1.5">
+                          {canEditOcc && (
                           <button
                             type="button"
                             onClick={() => openQuickPhotoModal(item)}
@@ -2368,8 +2379,9 @@ export default function OccurrencesView({ projects, selectedProjectId, currentUs
                             <Camera className="w-3.5 h-3.5" />
                             + Fotos ({photos.length})
                           </button>
+                          )}
 
-                          {!resolved && (
+                          {!resolved && canChangeStatus && (
                             <button
                               onClick={() => handleQuickStatus(item, 'RESOLVIDA')}
                               className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold transition"
@@ -2378,7 +2390,7 @@ export default function OccurrencesView({ projects, selectedProjectId, currentUs
                               Marcar Resolvida
                             </button>
                           )}
-                          {item.status === 'ABERTA' && (
+                          {item.status === 'ABERTA' && canChangeStatus && (
                             <button
                               onClick={() => handleQuickStatus(item, 'EM_ANDAMENTO')}
                               className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-800 text-xs font-semibold transition"
@@ -2389,6 +2401,7 @@ export default function OccurrencesView({ projects, selectedProjectId, currentUs
                         </div>
 
                         <div className="flex items-center gap-1">
+                          {canEditOcc && (
                           <button
                             onClick={() => openEditModal(item)}
                             className="p-2 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition"
@@ -2396,6 +2409,8 @@ export default function OccurrencesView({ projects, selectedProjectId, currentUs
                           >
                             <Edit3 className="w-4 h-4" />
                           </button>
+                          )}
+                          {canDeleteOcc && (
                           <button
                             onClick={() => handleDelete(item.id)}
                             className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
@@ -2403,6 +2418,7 @@ export default function OccurrencesView({ projects, selectedProjectId, currentUs
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
+                          )}
                         </div>
                       </div>
                     </div>
