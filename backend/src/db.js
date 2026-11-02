@@ -315,6 +315,7 @@ function initDatabase() {
   ensurePluviometryColumns();
   ensureReportSettingsColumns();
   ensureRdoColumns();
+  ensureEmployeeColumns();
   ensureOccurrenceColumns();
   ensureUserColumns();
   ensureProjectUserColumns();
@@ -551,6 +552,21 @@ function ensureRdoColumns() {
   for (const [colName, colDef] of additions) {
     if (!cols.includes(colName)) {
       db.exec(`ALTER TABLE rdo_records ADD COLUMN ${colName} ${colDef};`);
+    }
+  }
+}
+
+// Período de atividade do profissional na obra (data de início e fim).
+// Usado para calcular automaticamente o efetivo do dia no RDO.
+function ensureEmployeeColumns() {
+  const cols = db.prepare("PRAGMA table_info('employees')").all().map((c) => c.name);
+  const additions = [
+    ['start_date', "TEXT DEFAULT ''"],
+    ['end_date', "TEXT DEFAULT ''"]
+  ];
+  for (const [colName, colDef] of additions) {
+    if (!cols.includes(colName)) {
+      db.exec(`ALTER TABLE employees ADD COLUMN ${colName} ${colDef};`);
     }
   }
 }

@@ -1200,6 +1200,15 @@ app.delete('/api/roles/:key', authenticate, (req, res) => {
 // 3. CADASTRO DE FUNCIONÁRIOS (MÓDULO 3)
 // ============================================================================
 
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const validateEmployeePeriod = (start, end) => {
+  if (start && !DATE_RE.test(start)) return 'Data de início inválida.';
+  if (end && !DATE_RE.test(end)) return 'Data de fim inválida.';
+  if (end && !start) return 'Informe a data de início antes da data de fim.';
+  if (start && end && end < start) return 'A data de fim não pode ser anterior à data de início.';
+  return null;
+};
+
 app.get('/api/employees', authenticate, (req, res) => {
   const { projectId } = req.query;
   const accessible = req.accessibleProjectIds;
@@ -1246,12 +1255,16 @@ app.post('/api/employees', authenticate, (req, res) => {
     aso_expiry,
     nr_certifications,
     status,
-    project_id
+    project_id,
+    start_date,
+    end_date
   } = req.body;
 
   if (!name || !cpf || !role) {
     return res.status(400).json({ error: 'Nome, CPF e Função são obrigatórios.' });
   }
+  const periodError = validateEmployeePeriod(start_date, end_date);
+  if (periodError) return res.status(400).json({ error: periodError });
 
   if (project_id && !canUserAccessProject(req.user, project_id)) {
     return res.status(403).json({ error: 'Sem permissão para alocar funcionário nesta obra.' });
@@ -1260,8 +1273,8 @@ app.post('/api/employees', authenticate, (req, res) => {
   try {
     const info = db
       .prepare(`
-        INSERT INTO employees (name, cpf, registration_number, role, contract_type, company, phone, daily_rate, aso_expiry, nr_certifications, status, project_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO employees (name, cpf, registration_number, role, contract_type, company, phone, daily_rate, aso_expiry, nr_certifications, status, project_id, start_date, end_date)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       .run(
         name.trim(),
@@ -1275,7 +1288,9 @@ app.post('/api/employees', authenticate, (req, res) => {
         aso_expiry || null,
         nr_certifications || 'NR-18',
         status || 'ATIVO',
-        project_id ? Number(project_id) : null
+        project_id ? Number(project_id) : null,
+        start_date || '',
+        end_date || ''
       );
 
     const created = db.prepare('SELECT * FROM employees WHERE id = ?').get(Number(info.lastInsertRowid));
@@ -1306,15 +1321,22 @@ app.put('/api/employees/:id', authenticate, (req, res) => {
     aso_expiry,
     nr_certifications,
     status,
-    project_id
+    project_id,
+    start_date,
+    end_date
   } = req.body;
+
+  const nextStart = start_date !== undefined ? start_date || '' : existing.start_date || '';
+  const nextEnd = end_date !== undefined ? end_date || '' : existing.end_date || '';
+  const periodError = validateEmployeePeriod(nextStart, nextEnd);
+  if (periodError) return res.status(400).json({ error: periodError });
 
   try {
     db.prepare(`
       UPDATE employees
       SET name = ?, cpf = ?, registration_number = ?, role = ?, contract_type = ?,
           company = ?, phone = ?, daily_rate = ?, aso_expiry = ?, nr_certifications = ?,
-          status = ?, project_id = ?
+          status = ?, project_id = ?, start_date = ?, end_date = ?
       WHERE id = ?
     `).run(
       name,
@@ -1329,6 +1351,8 @@ app.put('/api/employees/:id', authenticate, (req, res) => {
       nr_certifications || '',
       status || 'ATIVO',
       project_id ? Number(project_id) : null,
+      nextStart,
+      nextEnd,
       empId
     );
 
@@ -2297,6 +2321,27 @@ app.delete('/api/occurrence-photos/:photoId', authenticate, (req, res) => {
 // RDO - REGISTRO DIÁRIO DE OBRAS (MÓDULO 2)
 // ============================================================================
 
+// Efetivo do dia: profissionais da obra ativos na data (início <= data e fim vazio ou >= data).
+// Cadastro antigo sem data de início: conta apenas se o status atual for ATIVO.
+const countActiveEmployees = (projectId, date) =>
+  db
+    .prepare(`
+      SELECT COUNT(*) as c FROM employees
+      WHERE project_id = ?
+        AND (
+          (COALESCE(start_date, '') <> '' AND start_date <= ?)
+          OR (COALESCE(start_date, '') = '' AND status = 'ATIVO')
+        )
+        AND (COALESCE(end_date, '') = '' OR end_date >= ?)
+    `)
+    .get(projectId, date, date).c;
+
+// Folhas em rascunho mostram sempre o efetivo atualizado; folhas finalizadas mantêm o valor registrado.
+const withLiveWorkForce = (rdo) =>
+  rdo && rdo.status !== 'final'
+    ? { ...rdo, work_force_count: countActiveEmployees(rdo.project_id, rdo.rdo_date) }
+    : rdo;
+
 app.get('/api/rdo', authenticate, (req, res) => {
   const { projectId, month, year, date, fromDate, toDate, order = 'ASC' } = req.query;
   const accessible = req.accessibleProjectIds;
@@ -2346,7 +2391,7 @@ app.get('/api/rdo', authenticate, (req, res) => {
   const sortDirection = String(order).toUpperCase() === 'DESC' ? 'DESC' : 'ASC';
   query += ` ORDER BY r.rdo_date ${sortDirection}, r.folio_number ${sortDirection}`;
   const rows = db.prepare(query).all(...params);
-  res.json(rows);
+  res.json(rows.map(withLiveWorkForce));
 });
 
 app.get('/api/rdo/by-date', authenticate, (req, res) => {
@@ -2416,7 +2461,7 @@ app.get('/api/rdo/by-date', authenticate, (req, res) => {
   if (existing) {
     return res.json({
       exists: true,
-      ...existing,
+      ...withLiveWorkForce(existing),
       photos_count: photos.length,
       available_photos: photos,
       suggested_services: autoServices,
@@ -2438,7 +2483,7 @@ app.get('/api/rdo/by-date', authenticate, (req, res) => {
     rdo_date: date,
     weather_condition: autoWeather,
     work_code: project?.code || settings.contract_number || '',
-    work_force_count: 0,
+    work_force_count: countActiveEmployees(pid, date),
     work_force_sufficient: 1,
     representative_engineer: settings.contractor_representative || '',
     representative_present: 1,
@@ -2579,7 +2624,7 @@ app.post('/api/rdo', authenticate, (req, res) => {
     rdo_date,
     weather_condition || 'BOM',
     work_code || '',
-    Number(work_force_count) || 0,
+    countActiveEmployees(pid, rdo_date),
     work_force_sufficient !== undefined ? (work_force_sufficient ? 1 : 0) : 1,
     representative_engineer || '',
     representative_present !== undefined ? (representative_present ? 1 : 0) : 1,
@@ -2702,9 +2747,7 @@ app.post('/api/rdo/batch', authenticate, (req, res) => {
         }
       }
 
-      const workForce = defaults.professionals !== null && defaults.professionals !== undefined && defaults.professionals !== ''
-        ? Number(defaults.professionals)
-        : null;
+      const workForce = countActiveEmployees(pid, date);
 
       const sufficient = defaults.sufficient === 'SIM' ? 1 : defaults.sufficient === 'NAO' || defaults.sufficient === 'NÃO' ? 0 : 1;
       const present = defaults.present === 'SIM' ? 1 : defaults.present === 'NAO' || defaults.present === 'NÃO' ? 0 : 1;
@@ -2716,7 +2759,7 @@ app.post('/api/rdo/batch', authenticate, (req, res) => {
         date,
         autoWeather,
         project?.code || settings.contract_number || '',
-        workForce !== null ? workForce : 0,
+        workForce,
         sufficient,
         settings.contractor_representative || '',
         present,

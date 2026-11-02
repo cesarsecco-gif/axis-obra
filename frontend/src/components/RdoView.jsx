@@ -2336,13 +2336,18 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
                   <span className="font-bold text-[11px] text-slate-700">PROFISSIONAIS EM ATIVIDADE:</span>
                   <input
                     type="number"
+                    readOnly
                     disabled={isLocked}
-                    value={rdoData.work_force_count ?? ''}
-                    onChange={(e) => setRdoData({ ...rdoData, work_force_count: e.target.value === '' ? null : Number(e.target.value) })}
-                    placeholder="Ex: 320"
-                    className="w-24 px-2 py-1 sm:py-0.5 border border-slate-900 font-bold text-center text-xs disabled:text-slate-900"
+                    value={rdoData.work_force_count ?? 0}
+                    title="Calculado automaticamente pelo Cadastro de Funcionários (Módulo 4)"
+                    className="w-24 px-2 py-1 sm:py-0.5 border border-slate-900 font-bold text-center text-xs bg-slate-100 cursor-not-allowed disabled:text-slate-900"
                   />
                 </div>
+                {!isLocked && (
+                  <p className="text-[10px] text-slate-500 leading-tight -mt-1">
+                    Automático: profissionais da obra com início até esta data e sem data de fim (ou fim a partir desta data), conforme o Módulo 4.
+                  </p>
+                )}
 
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 sm:gap-2">
                   <span className="font-bold text-[11px] text-slate-700">ENGENHEIRO PREPOSTO:</span>
@@ -2532,17 +2537,11 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
               <div>
                 <label className="block font-bold text-slate-700 mb-1">
-                  Profissionais iniciais:
+                  Profissionais em atividade:
                 </label>
-                <input
-                  type="number"
-                  min="0"
-                  max="10000"
-                  value={batchDefaults.professionals}
-                  onChange={(e) => setBatchDefaults({ ...batchDefaults, professionals: e.target.value })}
-                  placeholder="Ex: 320 (ou em branco)"
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg outline-none"
-                />
+                <p className="w-full px-3 py-2 border border-slate-200 bg-slate-50 rounded-lg text-slate-600">
+                  Calculado automaticamente para cada dia pelo Cadastro de Funcionários (Módulo 4).
+                </p>
               </div>
 
               <div>
