@@ -37,6 +37,7 @@ import {
   CheckSquare
 } from 'lucide-react';
 import { apiRequest, formatDateBR, can } from '../api';
+import { compressPhotoToDataURL } from '../imageUtils';
 
 const COLOR_PALETTE = {
   slate: {
@@ -135,42 +136,8 @@ function diffDaysBetween(startStr, endStr) {
   return Math.max(0, diff);
 }
 
-function readRawDataURL(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
-// Reduz a foto antes do envio (lado maior até 1600 px, JPEG 82%) — fotos de celular
-// de vários MB passam a ter poucas centenas de KB.
-const MAX_PHOTO_SIDE = 1600;
-async function readFileAsDataURL(file) {
-  const raw = await readRawDataURL(file);
-  if (!/^image\/(jpeg|png|webp|heic|heif)/i.test(file.type || '')) return raw;
-  try {
-    const img = await new Promise((resolve, reject) => {
-      const el = new Image();
-      el.onload = () => resolve(el);
-      el.onerror = reject;
-      el.src = raw;
-    });
-    const scale = Math.min(1, MAX_PHOTO_SIDE / Math.max(img.width, img.height));
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.round(img.width * scale);
-    canvas.height = Math.round(img.height * scale);
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    const compressed = canvas.toDataURL('image/jpeg', 0.82);
-    return compressed.length < raw.length ? compressed : raw;
-  } catch {
-    return raw;
-  }
-}
+// Reduz a foto antes do envio no padrão de impressão (2048 px, JPEG 85% — ver imageUtils.js)
+const readFileAsDataURL = (file) => compressPhotoToDataURL(file);
 
 export default function OccurrencesView({ projects, selectedProjectId, currentUser, onRefreshDashboard }) {
   // Permissões do perfil de acesso (o servidor também confere)

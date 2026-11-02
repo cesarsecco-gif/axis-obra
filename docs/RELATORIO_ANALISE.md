@@ -66,6 +66,7 @@ Implementado na branch `claude/finish-repository-l1vcze`. Os itens das seções 
 | Módulo 6 | Renomeado para "Gestão de Obras": obras + equipe por obra. Cadastro de usuários saiu dele. |
 | Custos | Sem "ver custos", diárias e custos de equipamentos não são enviados ao navegador e não podem ser alterados. |
 | Testes | 26 testes de API (`npm test`). |
+| Redução de fotos | Registro Fotográfico e Ocorrências reduzem as fotos no navegador para 2048 px / JPEG 85% (padrão de impressão), em `frontend/src/imageUtils.js`. Teste: foto de 10,8 MB (4032×3024) chegou com 0,94 MB (2048×1536). |
 
 ### Pendências após esta revisão
 1. **Contas de demonstração com senha `123456`** (`admin@axisobra.com.br`, `mariana@`, `roberto@`, `joao@`) continuam existindo em bancos já criados e em instalações novas. `admin@axisobra.com.br` é ADMIN. **Desativar em produção** (Obras por Usuário → Editar → Desativar) ou trocar as senhas.

@@ -119,7 +119,7 @@ Regras: o perfil **Administrador** é fixo (acesso total); perfis padrão não p
 ## 5. Manual dos Módulos do Sistema
 
 ### 5.1 Módulo 1 — Registro Fotográfico
-Upload múltiplo de fotos (JPG, PNG, WEBP, GIF até 15 MB) por etapa construtiva, local e data; edição individual; agrupamento por ano/mês/data/etapa; relatório fotográfico A4 em PDF e Excel com cabeçalho configurável.
+Upload múltiplo de fotos (JPG, PNG, WEBP, GIF até 15 MB), **reduzidas no próprio celular/computador antes do envio para o padrão de impressão: lado maior com até 2048 px, JPEG 85%** (≈270 dpi em foto de página inteira A4 e mais de 300 dpi com 4 a 6 fotos por página; uma foto de celular de 4–8 MB passa a ter ~0,5–1 MB). Fotos já pequenas são mantidas como estão. por etapa construtiva, local e data; edição individual; agrupamento por ano/mês/data/etapa; relatório fotográfico A4 em PDF e Excel com cabeçalho configurável.
 
 ### 5.2 Módulo 2 — Diário de Obras (RDO, padrão DER/PR)
 - Calendário com marcação dos dias que têm fotos e/ou RDO; filtro rápido por mês/ano.
@@ -130,7 +130,7 @@ Upload múltiplo de fotos (JPG, PNG, WEBP, GIF até 15 MB) por etapa construtiva
 - Impressão/PDF em uma folha A4.
 
 ### 5.3 Módulo 3 — Registro de Ocorrências
-Categoria, severidade, status e setor configuráveis (Módulo 8); prazo e data de resolução; fotos por fase (registro, tratativa, conclusão) reduzidas automaticamente antes do envio; histórico de mudanças de status; indicadores de SLA/lead time; relatórios por status (PDF/Excel).
+Categoria, severidade, status e setor configuráveis (Módulo 8); prazo e data de resolução; fotos por fase (registro, tratativa, conclusão) reduzidas antes do envio no mesmo padrão de impressão (2048 px, JPEG 85%); histórico de mudanças de status; indicadores de SLA/lead time; relatórios por status (PDF/Excel).
 
 ### 5.4 Módulo 4 — Cadastro de Funcionários
 Nome, CPF, matrícula, função, regime (CLT/terceirizado/PJ), empresa, diária, validade do ASO, certificações NR e status.

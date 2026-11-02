@@ -27,6 +27,7 @@ import {
   FileText,
   FileSpreadsheet
 } from 'lucide-react';
+import { compressPhoto } from '../imageUtils';
 import { apiRequest, formatDateBR } from '../api';
 import PhotoReportModal from './PhotoReportModal';
 
@@ -347,7 +348,7 @@ export default function PhotosView({ projects, selectedProjectId, onRefreshDashb
           fd.append('location_area', form.location_area);
           fd.append('taken_at', form.taken_at);
           fd.append('weather_condition', form.weather_condition);
-          fd.append('image', selectedFile);
+          fd.append('image', await compressPhoto(selectedFile));
 
           await apiRequest(url, { method: 'PUT', body: fd });
         } else {
@@ -394,7 +395,7 @@ export default function PhotosView({ projects, selectedProjectId, onRefreshDashb
     try {
       for (let i = 0; i < batchItems.length; i++) {
         const item = batchItems[i];
-        setSubmitProgress(`Salvando foto ${i + 1} de ${batchItems.length}...`);
+        setSubmitProgress(`Otimizando e salvando foto ${i + 1} de ${batchItems.length}...`);
 
         if (item.file) {
           const fd = new FormData();
@@ -405,7 +406,7 @@ export default function PhotosView({ projects, selectedProjectId, onRefreshDashb
           fd.append('location_area', item.location_area || '');
           fd.append('taken_at', form.taken_at);
           fd.append('weather_condition', form.weather_condition);
-          fd.append('image', item.file);
+          fd.append('image', await compressPhoto(item.file));
 
           await apiRequest('/api/photos', {
             method: 'POST',
