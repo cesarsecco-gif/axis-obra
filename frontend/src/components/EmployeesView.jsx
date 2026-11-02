@@ -167,6 +167,8 @@ export default function EmployeesView({ projects, selectedProjectId, onRefreshDa
   const dailyPayroll = filtered
     .filter((e) => e.status === 'ATIVO')
     .reduce((acc, cur) => acc + (Number(cur.daily_rate) || 0), 0);
+  // Sem permissão de ver custos o servidor envia null: mostra "—"
+  const dailyPayrollHidden = filtered.some((e) => e.daily_rate === null);
 
   return (
     <div className="space-y-6">
@@ -227,7 +229,7 @@ export default function EmployeesView({ projects, selectedProjectId, onRefreshDa
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
           <div>
             <p className="text-xs font-medium text-slate-500">Custo Diário do Efetivo Ativo</p>
-            <p className="text-xl font-bold text-slate-900 mt-0.5">{formatCurrency(dailyPayroll)}</p>
+            <p className="text-xl font-bold text-slate-900 mt-0.5">{formatCurrency(dailyPayrollHidden ? null : dailyPayroll)}</p>
           </div>
           <div className="p-2.5 rounded-lg bg-amber-50 text-amber-600">
             <HardHat className="w-5 h-5" />

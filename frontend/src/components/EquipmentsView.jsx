@@ -165,6 +165,8 @@ export default function EquipmentsView({ projects, selectedProjectId, onRefreshD
   const totalDailyCost = filtered
     .filter((e) => e.status === 'OPERACIONAL' || e.ownership === 'LOCADO')
     .reduce((acc, cur) => acc + (Number(cur.daily_cost) || 0), 0);
+  // Sem permissão de ver custos o servidor envia null: mostra "—"
+  const totalDailyCostHidden = filtered.some((e) => e.daily_cost === null);
 
   const getCategoryLabel = (val) => CATEGORIES.find((c) => c.value === val)?.label.split(' (')[0] || val;
 
@@ -227,7 +229,7 @@ export default function EquipmentsView({ projects, selectedProjectId, onRefreshD
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
           <div>
             <p className="text-xs font-medium text-slate-500">Custo Diário do Parque</p>
-            <p className="text-xl font-bold text-slate-900 mt-0.5">{formatCurrency(totalDailyCost)}</p>
+            <p className="text-xl font-bold text-slate-900 mt-0.5">{formatCurrency(totalDailyCostHidden ? null : totalDailyCost)}</p>
           </div>
           <div className="p-2.5 rounded-lg bg-cyan-50 text-cyan-600">
             <AlertCircle className="w-5 h-5" />

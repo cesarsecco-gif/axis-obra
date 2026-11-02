@@ -15,6 +15,7 @@ const {
   uploadsDir
 } = require('./db');
 const mailer = require('./mailer');
+const perms = require('./permissions');
 
 initDatabase();
 
@@ -112,10 +113,33 @@ function verifyToken(token) {
   }
 }
 
+// ============================================================================
+// PERFIS DE ACESSO
+// ============================================================================
+function parseRole(row) {
+  if (!row) return null;
+  let parsed = {};
+  try {
+    parsed = JSON.parse(row.permissions || '{}');
+  } catch {
+    parsed = {};
+  }
+  return { ...row, is_system: Boolean(row.is_system), permissions: perms.normalizePermissions(parsed) };
+}
+function getRole(key) {
+  return parseRole(db.prepare('SELECT * FROM roles WHERE key = ?').get(key));
+}
+const can = (req, moduleKey, action) => perms.can(req.role, moduleKey, action);
+// Sem a ação "ver custos", os valores não são enviados ao navegador
+const hideCosts = (req, moduleKey, row, field) =>
+  row && !perms.can(req.role, moduleKey, 'view_costs') ? { ...row, [field]: null } : row;
+const todayLocalISO = () => new Date().toISOString().slice(0, 10);
+const isAccessExpired = (user) => Boolean(user.access_expires_at) && user.access_expires_at < todayLocalISO();
+
 // Helper: get accessible project IDs for a user
 function getUserAccessibleProjectIds(user) {
   if (!user) return [];
-  if (user.role === 'ADMIN') {
+  if (perms.hasAllProjects(getRole(user.role))) {
     return db.prepare('SELECT id FROM projects').all().map((r) => Number(r.id));
   }
   return db
@@ -126,12 +150,14 @@ function getUserAccessibleProjectIds(user) {
 
 function canUserAccessProject(user, projectId) {
   if (!user) return false;
-  if (user.role === 'ADMIN') return true;
+  if (perms.hasAllProjects(getRole(user.role))) return true;
   const ids = getUserAccessibleProjectIds(user);
   return ids.includes(Number(projectId));
 }
 
-const USER_PUBLIC_FIELDS = 'id, name, email, role, crea_cft, phone, active, created_at';
+const USER_PUBLIC_FIELDS = `id, name, email, role, crea_cft, phone, active, created_at, display_name, cpf, birth_date,
+  phone_alt, employment_type, company, job_title, registration_number, council, council_number, council_uf,
+  access_expires_at, avatar_url, signature_url, notes, invite_pending, must_change_password, last_login_at`;
 
 // Auth middleware — aceita somente token Bearer assinado.
 function authenticate(req, res, next) {
@@ -147,25 +173,37 @@ function authenticate(req, res, next) {
   if (!user || !user.active) {
     return res.status(401).json({ error: 'Usuário inválido ou inativo.' });
   }
+  if (isAccessExpired(user)) {
+    return res.status(401).json({ error: 'O prazo de acesso desta conta expirou. Procure o administrador.' });
+  }
 
   req.user = user;
+  req.role = getRole(user.role);
   req.impersonatorId = decoded.impersonatorId || null;
   req.accessibleProjectIds = getUserAccessibleProjectIds(user);
+  req.allProjects = perms.hasAllProjects(req.role);
 
-  // Perfil FISCAL é somente leitura (pode apenas alterar a própria senha).
-  if (user.role === 'FISCAL' && req.method !== 'GET' && !req.originalUrl.startsWith('/api/auth/')) {
-    return res.status(403).json({ error: 'O perfil Fiscal possui acesso somente para consulta.' });
-  }
+  // Permissões do perfil de acesso para a rota chamada
+  const denied = perms.checkRoutePermission(req.role, req.method, req.originalUrl.split('?')[0]);
+  if (denied) return res.status(403).json({ error: denied });
 
   next();
 }
 
-function requireRoles(...roles) {
-  return (req, res, next) => {
-    if (!roles.includes(req.user.role)) {
-      return res.status(403).json({ error: 'Seu perfil não tem permissão para esta ação.' });
-    }
-    next();
+function publicRole(role) {
+  if (!role) return null;
+  return { key: role.key, name: role.name, color: role.color, scope: role.scope, is_system: role.is_system };
+}
+
+// Dados do usuário enviados ao frontend (inclui perfil e permissões)
+function sessionUser(user) {
+  const { password_hash, ...safeUser } = user;
+  const role = getRole(safeUser.role);
+  return {
+    ...safeUser,
+    role_info: publicRole(role),
+    permissions: perms.isAdminRole(role) ? 'ALL' : role ? role.permissions : {},
+    accessibleProjectIds: getUserAccessibleProjectIds(safeUser)
   };
 }
 
@@ -173,9 +211,14 @@ function buildSessionResponse(user, extra = {}) {
   const { password_hash, ...safeUser } = user;
   return {
     token: createToken(safeUser, extra),
-    user: { ...safeUser, accessibleProjectIds: getUserAccessibleProjectIds(safeUser) },
+    user: sessionUser(user),
     impersonatorId: extra.impersonatorId || null
   };
+}
+
+// Registra o acesso (último login e fim do convite pendente)
+function markLogin(userId) {
+  db.prepare('UPDATE users SET last_login_at = ?, invite_pending = 0 WHERE id = ?').run(new Date().toISOString(), userId);
 }
 
 // ============================================================================
@@ -243,12 +286,16 @@ app.post('/api/auth/login', (req, res) => {
     registerFailure(emailKey, 15 * 60 * 1000);
     return res.status(401).json({ error: 'E-mail ou senha inválidos.' });
   }
+  if (isAccessExpired(user)) {
+    return res.status(401).json({ error: 'O prazo de acesso desta conta expirou. Procure o administrador.' });
+  }
 
   // Migra hash antigo para scrypt de forma transparente
   if (isLegacyHash(user.password_hash)) {
     db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(password), user.id);
   }
 
+  markLogin(user.id);
   res.json(buildSessionResponse(user));
 });
 
@@ -308,17 +355,20 @@ app.post('/api/auth/request-code', async (req, res) => {
 });
 
 // Valida e consome um código. Retorna o usuário ou um objeto de erro.
-function consumeAuthCode(email, code, purpose) {
+function consumeAuthCode(email, code, purposes) {
+  const purposeList = Array.isArray(purposes) ? purposes : [purposes];
   const normEmail = normalizeEmail(email);
   const user = db.prepare('SELECT * FROM users WHERE LOWER(email) = ? AND active = 1').get(normEmail);
   const invalid = { error: 'Código inválido ou expirado. Solicite um novo código.' };
   if (!user || !code) return invalid;
+  if (isAccessExpired(user)) return { error: 'O prazo de acesso desta conta expirou. Procure o administrador.' };
 
   const row = db
     .prepare(
-      'SELECT * FROM auth_codes WHERE user_id = ? AND purpose = ? AND used_at IS NULL ORDER BY id DESC LIMIT 1'
+      `SELECT * FROM auth_codes WHERE user_id = ? AND purpose IN (${purposeList.map(() => '?').join(',')})
+       AND used_at IS NULL ORDER BY id DESC LIMIT 1`
     )
-    .get(user.id, purpose);
+    .get(user.id, ...purposeList);
   if (!row || row.expires_at < Date.now() || row.attempts >= CODE_MAX_ATTEMPTS) return invalid;
 
   const a = Buffer.from(hashCode(String(code).trim()));
@@ -342,6 +392,7 @@ app.post('/api/auth/login-code', (req, res) => {
     registerFailure(`verify-fail:${req.ip}`, 15 * 60 * 1000);
     return res.status(401).json({ error: result.error });
   }
+  markLogin(result.user.id);
   res.json(buildSessionResponse(result.user));
 });
 
@@ -353,24 +404,21 @@ app.post('/api/auth/reset-password', (req, res) => {
   if (isBlocked(`verify-fail:${req.ip}`, 30)) {
     return res.status(429).json({ error: 'Muitas tentativas. Aguarde alguns minutos.' });
   }
-  const result = consumeAuthCode(email, code, 'RESET');
+  // Recuperação de senha ou aceite do convite de nova conta
+  const result = consumeAuthCode(email, code, ['RESET', 'INVITE']);
   if (result.error) {
     registerFailure(`verify-fail:${req.ip}`, 15 * 60 * 1000);
     return res.status(401).json({ error: result.error });
   }
 
-  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(newPassword), result.user.id);
-  res.json({ success: true, message: 'Senha alterada com sucesso. Faça login com a nova senha.' });
+  db.prepare(
+    'UPDATE users SET password_hash = ?, invite_pending = 0, must_change_password = 0 WHERE id = ?'
+  ).run(hashPassword(newPassword), result.user.id);
+  res.json({ success: true, message: 'Senha definida com sucesso. Faça login com a nova senha.' });
 });
 
 app.get('/api/auth/me', authenticate, (req, res) => {
-  res.json({
-    user: {
-      ...req.user,
-      accessibleProjectIds: req.accessibleProjectIds
-    },
-    impersonatorId: req.impersonatorId
-  });
+  res.json({ user: sessionUser(req.user), impersonatorId: req.impersonatorId });
 });
 
 // Alterar a própria senha
@@ -386,30 +434,36 @@ app.put('/api/auth/password', authenticate, (req, res) => {
   if (!verifyPassword(currentPassword || '', row.password_hash)) {
     return res.status(400).json({ error: 'Senha atual incorreta.' });
   }
-  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(newPassword), req.user.id);
+  db.prepare('UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?').run(
+    hashPassword(newPassword),
+    req.user.id
+  );
   res.json({ success: true });
 });
 
 // Simular acesso de outro usuário (somente ADMIN). O token guarda quem iniciou a simulação.
 app.post('/api/auth/impersonate', authenticate, (req, res) => {
-  if (req.user.role !== 'ADMIN' || req.impersonatorId) {
-    return res.status(403).json({ error: 'Apenas Administradores podem simular o acesso de outro usuário.' });
+  if (!can(req, 'ACCOUNTS', 'impersonate') || req.impersonatorId) {
+    return res.status(403).json({ error: 'Seu perfil não permite simular o acesso de outro usuário.' });
   }
   const target = db.prepare('SELECT * FROM users WHERE id = ? AND active = 1').get(Number(req.body?.userId));
   if (!target) return res.status(404).json({ error: 'Usuário não encontrado ou inativo.' });
+  if (target.role === 'ADMIN' && !perms.isAdminRole(req.role)) {
+    return res.status(403).json({ error: 'Somente um Administrador pode simular o acesso de outro Administrador.' });
+  }
   res.json(buildSessionResponse(target, { impersonatorId: req.user.id }));
 });
 
 // Encerrar simulação e voltar ao administrador
 app.post('/api/auth/stop-impersonation', authenticate, (req, res) => {
   if (!req.impersonatorId) return res.status(400).json({ error: 'Nenhuma simulação ativa.' });
-  const admin = db.prepare("SELECT * FROM users WHERE id = ? AND active = 1 AND role = 'ADMIN'").get(req.impersonatorId);
-  if (!admin) return res.status(401).json({ error: 'Administrador original inválido. Faça login novamente.' });
-  res.json(buildSessionResponse(admin));
+  const original = db.prepare('SELECT * FROM users WHERE id = ? AND active = 1').get(req.impersonatorId);
+  if (!original) return res.status(401).json({ error: 'Usuário original inválido. Faça login novamente.' });
+  res.json(buildSessionResponse(original));
 });
 
 // Backup do banco de dados (somente ADMIN)
-app.get('/api/admin/backup', authenticate, requireRoles('ADMIN'), (_req, res) => {
+app.get('/api/admin/backup', authenticate, (_req, res) => {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   const tmpFile = path.join(dataDir, `backup-${stamp}-${crypto.randomBytes(3).toString('hex')}.db`);
   try {
@@ -613,9 +667,6 @@ app.get('/api/projects', authenticate, (req, res) => {
 });
 
 app.post('/api/projects', authenticate, (req, res) => {
-  if (req.user.role !== 'ADMIN') {
-    return res.status(403).json({ error: 'Apenas Administradores podem cadastrar novas obras.' });
-  }
 
   const {
     code,
@@ -736,20 +787,20 @@ app.put('/api/projects/:id', authenticate, (req, res) => {
 });
 
 app.delete('/api/projects/:id', authenticate, (req, res) => {
-  if (req.user.role !== 'ADMIN') {
-    return res.status(403).json({ error: 'Apenas Administradores podem excluir obras.' });
-  }
   const projectId = Number(req.params.id);
+  if (!canUserAccessProject(req.user, projectId)) {
+    return res.status(403).json({ error: 'Sem permissão para excluir esta obra.' });
+  }
   db.prepare('DELETE FROM projects WHERE id = ?').run(projectId);
   res.json({ success: true });
 });
 
 // Manage users linked to a project
 app.post('/api/projects/:id/users', authenticate, (req, res) => {
-  if (req.user.role !== 'ADMIN') {
-    return res.status(403).json({ error: 'Apenas Administradores podem gerenciar vínculos de usuários nas obras.' });
-  }
   const projectId = Number(req.params.id);
+  if (!canUserAccessProject(req.user, projectId)) {
+    return res.status(403).json({ error: 'Sem permissão nesta obra.' });
+  }
   const { user_id, role_in_project, can_edit } = req.body;
 
   if (!user_id) {
@@ -768,159 +819,380 @@ app.post('/api/projects/:id/users', authenticate, (req, res) => {
 });
 
 app.delete('/api/projects/:id/users/:userId', authenticate, (req, res) => {
-  if (req.user.role !== 'ADMIN') {
-    return res.status(403).json({ error: 'Apenas Administradores podem remover vínculos de usuários.' });
-  }
   const projectId = Number(req.params.id);
+  if (!canUserAccessProject(req.user, projectId)) {
+    return res.status(403).json({ error: 'Sem permissão nesta obra.' });
+  }
   const targetUserId = Number(req.params.userId);
 
   db.prepare('DELETE FROM project_users WHERE project_id = ? AND user_id = ?').run(projectId, targetUserId);
   res.json({ success: true });
 });
 
-// Users CRUD (for managing users & assigning projects)
-app.get('/api/users', authenticate, requireRoles('ADMIN'), (_req, res) => {
-  const users = db
-    .prepare('SELECT id, name, email, role, crea_cft, phone, active, created_at FROM users ORDER BY id ASC')
-    .all();
+// ============================================================================
+// 9. GESTÃO DE CONTAS (usuários) e PERFIS DE ACESSO
+// ============================================================================
+const ACCOUNT_FIELDS = [
+  'name',
+  'display_name',
+  'cpf',
+  'birth_date',
+  'phone',
+  'phone_alt',
+  'employment_type',
+  'company',
+  'job_title',
+  'registration_number',
+  'council',
+  'council_number',
+  'council_uf',
+  'crea_cft',
+  'access_expires_at',
+  'notes'
+];
+const EMPLOYMENT_TYPES = ['PROPRIO', 'TERCEIRIZADO', 'FISCALIZACAO', 'CLIENTE'];
+const INVITE_TTL_DAYS = 7;
 
-  const result = users.map((u) => {
-    const projects = db
-      .prepare(`
-        SELECT p.id, p.code, p.name, pu.role_in_project, pu.can_edit
-        FROM project_users pu
-        JOIN projects p ON p.id = pu.project_id
-        WHERE pu.user_id = ?
-        ORDER BY p.id ASC
-      `)
-      .all(u.id);
-    return { ...u, projects };
+function listUserProjects(userId) {
+  return db
+    .prepare(`
+      SELECT p.id, p.code, p.name, pu.role_in_project, pu.can_edit, pu.since_date
+      FROM project_users pu
+      JOIN projects p ON p.id = pu.project_id
+      WHERE pu.user_id = ?
+      ORDER BY p.id ASC
+    `)
+    .all(userId);
+}
+
+function getAccount(userId) {
+  const u = db.prepare(`SELECT ${USER_PUBLIC_FIELDS} FROM users WHERE id = ?`).get(userId);
+  if (!u) return null;
+  return { ...u, role_info: publicRole(getRole(u.role)), projects: listUserProjects(u.id) };
+}
+
+// Grava os vínculos de obra informados no cadastro da conta
+function saveAssignments(userId, assignments) {
+  if (!Array.isArray(assignments)) return;
+  db.prepare('DELETE FROM project_users WHERE user_id = ?').run(userId);
+  const stmt = db.prepare(`
+    INSERT INTO project_users (project_id, user_id, role_in_project, can_edit, since_date)
+    VALUES (?, ?, ?, 1, ?)
+  `);
+  for (const item of assignments) {
+    const pid = Number(item.project_id);
+    if (!db.prepare('SELECT id FROM projects WHERE id = ?').get(pid)) continue;
+    stmt.run(pid, userId, String(item.role_in_project || '').trim() || 'Equipe da obra', item.since_date || '');
+  }
+}
+
+function validateAccountInput(body, { creating }) {
+  if (creating && (!body.name || !String(body.name).trim())) return 'Informe o nome completo.';
+  if (creating && (!body.email || !String(body.email).includes('@'))) return 'Informe um e-mail válido.';
+  if (body.employment_type && !EMPLOYMENT_TYPES.includes(body.employment_type)) return 'Vínculo inválido.';
+  if (body.cpf && String(body.cpf).replace(/\D/g, '').length !== 11) return 'CPF deve ter 11 dígitos.';
+  if (body.password && String(body.password).length < PASSWORD_MIN) {
+    return `A senha deve ter pelo menos ${PASSWORD_MIN} caracteres.`;
+  }
+  return null;
+}
+
+// Só um Administrador pode criar/editar Administradores ou dar esse perfil a alguém
+function checkRoleAssignment(req, targetRoleKey, existingRoleKey) {
+  if (!getRole(targetRoleKey)) return 'Perfil de acesso inválido.';
+  const adminInvolved = targetRoleKey === 'ADMIN' || existingRoleKey === 'ADMIN';
+  if (adminInvolved && !perms.isAdminRole(req.role)) {
+    return 'Somente um Administrador pode atribuir o perfil Administrador ou alterar a conta de um Administrador.';
+  }
+  return null;
+}
+
+function appBaseUrl(req) {
+  return (process.env.APP_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
+}
+
+async function sendInvite(req, user) {
+  const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+  const now = Date.now();
+  db.prepare("UPDATE auth_codes SET used_at = ? WHERE user_id = ? AND purpose = 'INVITE' AND used_at IS NULL").run(now, user.id);
+  db.prepare(
+    "INSERT INTO auth_codes (user_id, purpose, code_hash, expires_at, created_at) VALUES (?, 'INVITE', ?, ?, ?)"
+  ).run(user.id, hashCode(code), now + INVITE_TTL_DAYS * 24 * 3600 * 1000, now);
+  const link = `${appBaseUrl(req)}/?convite=1&email=${encodeURIComponent(user.email)}&codigo=${code}`;
+  await mailer.sendAuthCode({
+    to: user.email,
+    name: user.name,
+    code,
+    purpose: 'INVITE',
+    minutes: INVITE_TTL_DAYS * 24 * 60,
+    link,
+    invitedBy: req.user.name
   });
+}
 
-  res.json(result);
+app.get('/api/users', authenticate, (_req, res) => {
+  const users = db.prepare(`SELECT ${USER_PUBLIC_FIELDS} FROM users ORDER BY active DESC, name ASC`).all();
+  const roles = new Map(db.prepare('SELECT * FROM roles').all().map((r) => [r.key, publicRole(parseRole(r))]));
+  res.json(users.map((u) => ({ ...u, role_info: roles.get(u.role) || null, projects: listUserProjects(u.id) })));
 });
 
-app.post('/api/users', authenticate, (req, res) => {
-  if (req.user.role !== 'ADMIN') {
-    return res.status(403).json({ error: 'Apenas Administradores podem cadastrar novos usuários.' });
+app.get('/api/users/:id', authenticate, (req, res) => {
+  const account = getAccount(Number(req.params.id));
+  if (!account) return res.status(404).json({ error: 'Conta não encontrada.' });
+  res.json(account);
+});
+
+app.post('/api/users', authenticate, async (req, res) => {
+  const body = req.body || {};
+  const invalid = validateAccountInput(body, { creating: true });
+  if (invalid) return res.status(400).json({ error: invalid });
+
+  const roleKey = body.role || 'ENGENHEIRO';
+  const roleError = checkRoleAssignment(req, roleKey, null);
+  if (roleError) return res.status(roleError.startsWith('Somente') ? 403 : 400).json({ error: roleError });
+
+  // Primeiro acesso: convite por e-mail (padrão) ou senha definida agora (troca obrigatória no 1º login)
+  const sendInviteEmail = body.first_access ? body.first_access !== 'PASSWORD' : !body.password;
+  if (!sendInviteEmail && !body.password) {
+    return res.status(400).json({ error: 'Informe a senha inicial ou escolha enviar convite por e-mail.' });
+  }
+  if (sendInviteEmail && !mailer.emailAvailable) {
+    return res.status(503).json({ error: 'O envio de e-mail não está configurado. Escolha "Definir senha agora".' });
   }
 
-  const { name, email, password, role, crea_cft, phone, projectIds, role_in_project } = req.body;
-  if (!name || !email) {
-    return res.status(400).json({ error: 'Nome e e-mail são obrigatórios.' });
-  }
-  if (!VALID_ROLES.includes(role || 'ENGENHEIRO')) {
-    return res.status(400).json({ error: 'Perfil inválido.' });
-  }
-  if (password && String(password).length < PASSWORD_MIN) {
-    return res.status(400).json({ error: `A senha deve ter pelo menos ${PASSWORD_MIN} caracteres.` });
+  const avatarUrl = body.avatar_base64 ? saveBase64Image(body.avatar_base64, 'avatar') : '';
+  const signatureUrl = body.signature_base64 ? saveBase64Image(body.signature_base64, 'assinatura') : '';
+  if ((body.avatar_base64 && !avatarUrl) || (body.signature_base64 && !signatureUrl)) {
+    return res.status(400).json({ error: 'Imagem inválida. Use JPG, PNG ou WEBP de até 10 MB.' });
   }
 
+  let newUserId;
   try {
+    const cols = ['email', 'password_hash', 'role', 'active', 'invite_pending', 'must_change_password', 'avatar_url', 'signature_url', ...ACCOUNT_FIELDS];
+    const values = [
+      normalizeEmail(body.email),
+      hashPassword(sendInviteEmail ? crypto.randomBytes(18).toString('base64url') : body.password),
+      roleKey,
+      body.active === false ? 0 : 1,
+      sendInviteEmail ? 1 : 0,
+      sendInviteEmail ? 0 : 1,
+      avatarUrl || '',
+      signatureUrl || '',
+      ...ACCOUNT_FIELDS.map((f) => (body[f] !== undefined && body[f] !== null ? String(body[f]).trim() : f === 'employment_type' ? 'PROPRIO' : ''))
+    ];
     const info = db
-      .prepare(`
-        INSERT INTO users (name, email, password_hash, role, crea_cft, phone, active)
-        VALUES (?, ?, ?, ?, ?, ?, 1)
-      `)
-      .run(
-        name.trim(),
-        email.trim().toLowerCase(),
-        // Sem senha informada: senha aleatória; o usuário entra por código no e-mail ou usa "Esqueci minha senha".
-        hashPassword(password || crypto.randomBytes(18).toString('base64url')),
-        role || 'ENGENHEIRO',
-        crea_cft || '',
-        phone || ''
-      );
-
-    const newUserId = Number(info.lastInsertRowid);
-
-    if (Array.isArray(projectIds) && projectIds.length > 0) {
-      const insertLink = db.prepare(`
-        INSERT OR IGNORE INTO project_users (project_id, user_id, role_in_project, can_edit)
-        VALUES (?, ?, ?, 1)
-      `);
-      for (const pid of projectIds) {
-        insertLink.run(Number(pid), newUserId, role_in_project || 'Engenheiro / Equipe Técnica');
-      }
-    }
-
-    const user = db.prepare('SELECT id, name, email, role, crea_cft, phone, active FROM users WHERE id = ?').get(newUserId);
-    res.status(201).json(user);
+      .prepare(`INSERT INTO users (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`)
+      .run(...values);
+    newUserId = Number(info.lastInsertRowid);
   } catch (err) {
-    res.status(400).json({ error: err.message.includes('UNIQUE') ? 'E-mail já cadastrado.' : err.message });
+    return res.status(400).json({ error: err.message.includes('UNIQUE') ? 'E-mail já cadastrado.' : err.message });
   }
+
+  // Compatibilidade com o formato antigo (projectIds + role_in_project)
+  const assignments = Array.isArray(body.assignments)
+    ? body.assignments
+    : Array.isArray(body.projectIds)
+    ? body.projectIds.map((pid) => ({ project_id: pid, role_in_project: body.role_in_project }))
+    : [];
+  saveAssignments(newUserId, assignments);
+
+  let inviteWarning = null;
+  if (sendInviteEmail) {
+    try {
+      await sendInvite(req, getAccount(newUserId));
+    } catch (err) {
+      console.error('Falha ao enviar convite:', err.message);
+      inviteWarning = 'Conta criada, mas o e-mail de convite não pôde ser enviado. Use "Reenviar convite".';
+    }
+  }
+
+  res.status(201).json({ ...getAccount(newUserId), inviteWarning });
 });
 
-const VALID_ROLES = ['ADMIN', 'ENGENHEIRO', 'ENCARREGADO', 'FISCAL'];
-
-// Editar dados de um usuário (inclui ativar/desativar)
-app.put('/api/users/:id', authenticate, requireRoles('ADMIN'), (req, res) => {
+app.put('/api/users/:id', authenticate, (req, res) => {
   const targetId = Number(req.params.id);
   const existing = db.prepare('SELECT * FROM users WHERE id = ?').get(targetId);
-  if (!existing) return res.status(404).json({ error: 'Usuário não encontrado.' });
+  if (!existing) return res.status(404).json({ error: 'Conta não encontrada.' });
 
-  const { name, email, role, crea_cft, phone, active } = req.body;
-  const newRole = role || existing.role;
-  const newActive = active !== undefined ? (active ? 1 : 0) : existing.active;
-  if (!VALID_ROLES.includes(newRole)) return res.status(400).json({ error: 'Perfil inválido.' });
+  const body = req.body || {};
+  const invalid = validateAccountInput(body, { creating: false });
+  if (invalid) return res.status(400).json({ error: invalid });
 
-  if (targetId === req.user.id && (newRole !== 'ADMIN' || !newActive)) {
-    return res.status(400).json({ error: 'Você não pode remover seu próprio perfil de Administrador nem se desativar.' });
+  const newRole = body.role || existing.role;
+  const newActive = body.active !== undefined ? (body.active ? 1 : 0) : existing.active;
+  const roleError = checkRoleAssignment(req, newRole, existing.role);
+  if (roleError) return res.status(roleError.startsWith('Somente') ? 403 : 400).json({ error: roleError });
+
+  if (targetId === req.user.id && (newRole !== existing.role || !newActive)) {
+    return res.status(400).json({ error: 'Você não pode alterar o próprio perfil de acesso nem desativar a própria conta.' });
   }
-  if (existing.role === 'ADMIN' && (newRole !== 'ADMIN' || !newActive)) {
+  if (existing.role === 'ADMIN' && existing.active && (newRole !== 'ADMIN' || !newActive)) {
     const otherAdmins = db
       .prepare("SELECT COUNT(*) as c FROM users WHERE role = 'ADMIN' AND active = 1 AND id != ?")
       .get(targetId).c;
     if (otherAdmins === 0) return res.status(400).json({ error: 'O sistema precisa ter pelo menos um Administrador ativo.' });
   }
 
+  let avatarUrl = existing.avatar_url;
+  let signatureUrl = existing.signature_url;
+  if (body.avatar_base64) {
+    avatarUrl = saveBase64Image(body.avatar_base64, 'avatar');
+    if (!avatarUrl) return res.status(400).json({ error: 'Foto inválida. Use JPG, PNG ou WEBP de até 10 MB.' });
+  } else if (body.avatar_url === '') avatarUrl = '';
+  if (body.signature_base64) {
+    signatureUrl = saveBase64Image(body.signature_base64, 'assinatura');
+    if (!signatureUrl) return res.status(400).json({ error: 'Assinatura inválida. Use JPG, PNG ou WEBP de até 10 MB.' });
+  } else if (body.signature_url === '') signatureUrl = '';
+
   try {
-    db.prepare('UPDATE users SET name = ?, email = ?, role = ?, crea_cft = ?, phone = ?, active = ? WHERE id = ?').run(
-      name !== undefined ? String(name).trim() : existing.name,
-      email !== undefined ? normalizeEmail(email) : existing.email,
+    const sets = ['email = ?', 'role = ?', 'active = ?', 'avatar_url = ?', 'signature_url = ?', ...ACCOUNT_FIELDS.map((f) => `${f} = ?`)];
+    const values = [
+      body.email !== undefined ? normalizeEmail(body.email) : existing.email,
       newRole,
-      crea_cft !== undefined ? crea_cft : existing.crea_cft,
-      phone !== undefined ? phone : existing.phone,
       newActive,
-      targetId
-    );
+      avatarUrl || '',
+      signatureUrl || '',
+      ...ACCOUNT_FIELDS.map((f) => (body[f] !== undefined && body[f] !== null ? String(body[f]).trim() : existing[f]))
+    ];
+    db.prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`).run(...values, targetId);
   } catch (err) {
     return res.status(400).json({ error: err.message.includes('UNIQUE') ? 'E-mail já cadastrado.' : err.message });
   }
-  res.json(db.prepare(`SELECT ${USER_PUBLIC_FIELDS} FROM users WHERE id = ?`).get(targetId));
+
+  if (Array.isArray(body.assignments)) saveAssignments(targetId, body.assignments);
+  res.json(getAccount(targetId));
 });
 
-// Definir nova senha para um usuário (ADMIN)
-app.put('/api/users/:id/password', authenticate, requireRoles('ADMIN'), (req, res) => {
+// Definir nova senha para uma conta (pede troca no próximo acesso)
+app.put('/api/users/:id/password', authenticate, (req, res) => {
   const targetId = Number(req.params.id);
   const { newPassword } = req.body;
   if (!newPassword || String(newPassword).length < PASSWORD_MIN) {
     return res.status(400).json({ error: `A nova senha deve ter pelo menos ${PASSWORD_MIN} caracteres.` });
   }
-  const info = db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(newPassword), targetId);
-  if (!info.changes) return res.status(404).json({ error: 'Usuário não encontrado.' });
+  const target = db.prepare('SELECT role FROM users WHERE id = ?').get(targetId);
+  if (!target) return res.status(404).json({ error: 'Conta não encontrada.' });
+  if (target.role === 'ADMIN' && !perms.isAdminRole(req.role)) {
+    return res.status(403).json({ error: 'Somente um Administrador pode redefinir a senha de outro Administrador.' });
+  }
+  db.prepare('UPDATE users SET password_hash = ?, must_change_password = ? WHERE id = ?').run(
+    hashPassword(newPassword),
+    targetId === req.user.id ? 0 : 1,
+    targetId
+  );
   res.json({ success: true });
 });
 
+// Reenviar convite de primeiro acesso
+app.post('/api/users/:id/invite', authenticate, async (req, res) => {
+  const account = getAccount(Number(req.params.id));
+  if (!account || !account.active) return res.status(404).json({ error: 'Conta não encontrada ou inativa.' });
+  if (!mailer.emailAvailable) return res.status(503).json({ error: 'O envio de e-mail não está configurado no servidor.' });
+  try {
+    db.prepare('UPDATE users SET invite_pending = 1 WHERE id = ? AND last_login_at = ?').run(account.id, '');
+    await sendInvite(req, account);
+  } catch (err) {
+    console.error('Falha ao enviar convite:', err.message);
+    return res.status(502).json({ error: 'Não foi possível enviar o convite agora. Tente novamente mais tarde.' });
+  }
+  res.json({ success: true, message: `Convite enviado para ${account.email}.` });
+});
+
 app.put('/api/users/:id/projects', authenticate, (req, res) => {
-  if (req.user.role !== 'ADMIN') {
-    return res.status(403).json({ error: 'Apenas Administradores podem alterar permissões de obras por usuário.' });
-  }
   const targetUserId = Number(req.params.id);
-  const { assignments } = req.body; // Array of { project_id, role_in_project }
+  const { assignments } = req.body; // Array of { project_id, role_in_project, since_date }
+  saveAssignments(targetUserId, Array.isArray(assignments) ? assignments : []);
+  res.json({ success: true });
+});
 
-  db.prepare('DELETE FROM project_users WHERE user_id = ?').run(targetUserId);
+// --- Perfis de acesso (Módulo 8 → Perfis de Acesso) ---
+function listRoles() {
+  const counts = new Map(
+    db.prepare('SELECT role, COUNT(*) as c FROM users WHERE active = 1 GROUP BY role').all().map((r) => [r.role, r.c])
+  );
+  return db
+    .prepare('SELECT * FROM roles ORDER BY is_system DESC, id ASC')
+    .all()
+    .map((r) => ({ ...parseRole(r), users_count: counts.get(r.key) || 0 }));
+}
 
-  if (Array.isArray(assignments)) {
-    const stmt = db.prepare(`
-      INSERT INTO project_users (project_id, user_id, role_in_project, can_edit)
-      VALUES (?, ?, ?, 1)
-    `);
-    for (const item of assignments) {
-      stmt.run(Number(item.project_id), targetUserId, item.role_in_project || 'Responsável Técnico');
-    }
+app.get('/api/roles', authenticate, (_req, res) => {
+  res.json({ roles: listRoles(), modules: perms.MODULES });
+});
+
+const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
+function validateRoleInput(body) {
+  if (!body.name || !String(body.name).trim()) return 'Informe o nome do perfil.';
+  if (String(body.name).trim().length > 60) return 'Nome do perfil muito longo (máximo 60 caracteres).';
+  if (body.color && !HEX_COLOR.test(body.color)) return 'Cor inválida.';
+  if (body.scope && !['LINKED', 'ALL'].includes(body.scope)) return 'Abrangência inválida.';
+  return null;
+}
+
+app.post('/api/roles', authenticate, (req, res) => {
+  const body = req.body || {};
+  const invalid = validateRoleInput(body);
+  if (invalid) return res.status(400).json({ error: invalid });
+  const slug = String(body.name)
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '_')
+    .replace(/^_|_$/g, '')
+    .slice(0, 30);
+  const key = `P_${slug || 'PERFIL'}_${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
+  try {
+    db.prepare(
+      'INSERT INTO roles (key, name, description, color, scope, is_system, permissions) VALUES (?, ?, ?, ?, ?, 0, ?)'
+    ).run(
+      key,
+      String(body.name).trim(),
+      String(body.description || '').trim(),
+      body.color || '#475569',
+      body.scope || 'LINKED',
+      JSON.stringify(perms.normalizePermissions(body.permissions))
+    );
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
   }
+  res.status(201).json(listRoles().find((r) => r.key === key));
+});
 
+app.put('/api/roles/:key', authenticate, (req, res) => {
+  const existing = db.prepare('SELECT * FROM roles WHERE key = ?').get(req.params.key);
+  if (!existing) return res.status(404).json({ error: 'Perfil não encontrado.' });
+  if (existing.key === 'ADMIN') {
+    return res.status(400).json({ error: 'O perfil Administrador tem sempre acesso total e não pode ser alterado.' });
+  }
+  if (existing.key === req.user.role && !perms.isAdminRole(req.role)) {
+    return res.status(403).json({ error: 'Você não pode alterar as permissões do seu próprio perfil.' });
+  }
+  const body = { name: existing.name, ...req.body };
+  const invalid = validateRoleInput(body);
+  if (invalid) return res.status(400).json({ error: invalid });
+
+  db.prepare(
+    'UPDATE roles SET name = ?, description = ?, color = ?, scope = ?, permissions = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+  ).run(
+    String(body.name).trim(),
+    body.description !== undefined ? String(body.description).trim() : existing.description,
+    body.color || existing.color,
+    body.scope || existing.scope,
+    body.permissions ? JSON.stringify(perms.normalizePermissions(body.permissions)) : existing.permissions,
+    existing.id
+  );
+  res.json(listRoles().find((r) => r.key === existing.key));
+});
+
+app.delete('/api/roles/:key', authenticate, (req, res) => {
+  const existing = db.prepare('SELECT * FROM roles WHERE key = ?').get(req.params.key);
+  if (!existing) return res.status(404).json({ error: 'Perfil não encontrado.' });
+  if (existing.is_system) return res.status(400).json({ error: 'Perfis padrão podem ser ajustados, mas não excluídos.' });
+  const inUse = db.prepare('SELECT COUNT(*) as c FROM users WHERE role = ?').get(existing.key).c;
+  if (inUse > 0) {
+    return res.status(409).json({ error: `Este perfil está em uso por ${inUse} conta(s). Troque o perfil dessas contas antes de excluir.` });
+  }
+  db.prepare('DELETE FROM roles WHERE id = ?').run(existing.id);
   res.json({ success: true });
 });
 
@@ -932,7 +1204,7 @@ app.get('/api/employees', authenticate, (req, res) => {
   const { projectId } = req.query;
   const accessible = req.accessibleProjectIds;
 
-  if (accessible.length === 0 && req.user.role !== 'ADMIN') {
+  if (accessible.length === 0 && !req.allProjects) {
     return res.json([]);
   }
 
@@ -950,7 +1222,7 @@ app.get('/api/employees', authenticate, (req, res) => {
     }
     query += ' WHERE e.project_id = ?';
     params.push(pid);
-  } else if (req.user.role !== 'ADMIN') {
+  } else if (!req.allProjects) {
     const placeholders = accessible.map(() => '?').join(',');
     query += ` WHERE e.project_id IN (${placeholders})`;
     params.push(...accessible);
@@ -958,7 +1230,7 @@ app.get('/api/employees', authenticate, (req, res) => {
 
   query += ' ORDER BY e.name ASC';
   const rows = db.prepare(query).all(...params);
-  res.json(rows);
+  res.json(rows.map((r) => hideCosts(req, 'EMPLOYEES', r, 'daily_rate')));
 });
 
 app.post('/api/employees', authenticate, (req, res) => {
@@ -999,7 +1271,7 @@ app.post('/api/employees', authenticate, (req, res) => {
         contract_type || 'CLT',
         company || 'Axis Construtora',
         phone || '',
-        Number(daily_rate) || 0,
+        can(req, 'EMPLOYEES', 'view_costs') ? Number(daily_rate) || 0 : 0,
         aso_expiry || null,
         nr_certifications || 'NR-18',
         status || 'ATIVO',
@@ -1052,7 +1324,7 @@ app.put('/api/employees/:id', authenticate, (req, res) => {
       contract_type || 'CLT',
       company || 'Axis Construtora',
       phone || '',
-      Number(daily_rate) || 0,
+      can(req, 'EMPLOYEES', 'view_costs') ? Number(daily_rate) || 0 : existing.daily_rate,
       aso_expiry || null,
       nr_certifications || '',
       status || 'ATIVO',
@@ -1088,7 +1360,7 @@ app.get('/api/equipments', authenticate, (req, res) => {
   const { projectId } = req.query;
   const accessible = req.accessibleProjectIds;
 
-  if (accessible.length === 0 && req.user.role !== 'ADMIN') {
+  if (accessible.length === 0 && !req.allProjects) {
     return res.json([]);
   }
 
@@ -1106,7 +1378,7 @@ app.get('/api/equipments', authenticate, (req, res) => {
     }
     query += ' WHERE eq.project_id = ?';
     params.push(pid);
-  } else if (req.user.role !== 'ADMIN') {
+  } else if (!req.allProjects) {
     const placeholders = accessible.map(() => '?').join(',');
     query += ` WHERE eq.project_id IN (${placeholders})`;
     params.push(...accessible);
@@ -1114,7 +1386,7 @@ app.get('/api/equipments', authenticate, (req, res) => {
 
   query += ' ORDER BY eq.code ASC';
   const rows = db.prepare(query).all(...params);
-  res.json(rows);
+  res.json(rows.map((r) => hideCosts(req, 'EQUIPMENTS', r, 'daily_cost')));
 });
 
 app.post('/api/equipments', authenticate, (req, res) => {
@@ -1158,7 +1430,7 @@ app.post('/api/equipments', authenticate, (req, res) => {
         serial_number || '',
         ownership || 'PROPRIO',
         supplier || '',
-        Number(daily_cost) || 0,
+        can(req, 'EQUIPMENTS', 'view_costs') ? Number(daily_cost) || 0 : 0,
         status || 'OPERACIONAL',
         last_maintenance || null,
         next_maintenance || null,
@@ -1215,7 +1487,7 @@ app.put('/api/equipments/:id', authenticate, (req, res) => {
       serial_number || '',
       ownership || 'PROPRIO',
       supplier || '',
-      Number(daily_cost) || 0,
+      can(req, 'EQUIPMENTS', 'view_costs') ? Number(daily_cost) || 0 : existing.daily_cost,
       status || 'OPERACIONAL',
       last_maintenance || null,
       next_maintenance || null,
@@ -1253,7 +1525,7 @@ app.get('/api/report-settings', authenticate, (_req, res) => {
   res.json(row || {});
 });
 
-app.put('/api/report-settings', authenticate, requireRoles('ADMIN', 'ENGENHEIRO'), upload.single('banner_file'), (req, res) => {
+app.put('/api/report-settings', authenticate, upload.single('banner_file'), (req, res) => {
   const existing = db.prepare('SELECT * FROM report_settings WHERE id = 1').get();
   const {
     orientation,
@@ -1572,7 +1844,7 @@ app.get('/api/occurrence-params', authenticate, (req, res) => {
   res.json(rows);
 });
 
-app.post('/api/occurrence-params', authenticate, requireRoles('ADMIN', 'ENGENHEIRO'), (req, res) => {
+app.post('/api/occurrence-params', authenticate, (req, res) => {
   const { group_key, code, label, color, is_resolved, is_critical, sort_order } = req.body;
   if (!group_key || !label || !label.trim()) {
     return res.status(400).json({ error: 'Grupo e nome da opção são obrigatórios.' });
@@ -1619,7 +1891,7 @@ app.post('/api/occurrence-params', authenticate, requireRoles('ADMIN', 'ENGENHEI
   res.status(201).json(created);
 });
 
-app.put('/api/occurrence-params/:id', authenticate, requireRoles('ADMIN', 'ENGENHEIRO'), (req, res) => {
+app.put('/api/occurrence-params/:id', authenticate, (req, res) => {
   const paramId = Number(req.params.id);
   const existing = db.prepare('SELECT * FROM occurrence_params WHERE id = ?').get(paramId);
   if (!existing) {
@@ -1659,7 +1931,7 @@ app.put('/api/occurrence-params/:id', authenticate, requireRoles('ADMIN', 'ENGEN
   res.json(updated);
 });
 
-app.delete('/api/occurrence-params/:id', authenticate, requireRoles('ADMIN', 'ENGENHEIRO'), (req, res) => {
+app.delete('/api/occurrence-params/:id', authenticate, (req, res) => {
   const paramId = Number(req.params.id);
   const existing = db.prepare('SELECT * FROM occurrence_params WHERE id = ?').get(paramId);
   if (!existing) {
@@ -1671,7 +1943,7 @@ app.delete('/api/occurrence-params/:id', authenticate, requireRoles('ADMIN', 'EN
 });
 
 // Restaurar opções padrão dos campos de ocorrência
-app.post('/api/occurrence-params/reset', authenticate, requireRoles('ADMIN', 'ENGENHEIRO'), (_req, res) => {
+app.post('/api/occurrence-params/reset', authenticate, (_req, res) => {
   db.exec('DELETE FROM occurrence_params;');
   seedOccurrenceParamsIfEmpty();
   res.json(db.prepare('SELECT * FROM occurrence_params ORDER BY group_key ASC, sort_order ASC, id ASC').all());
@@ -1888,6 +2160,9 @@ app.put('/api/occurrences/:id', authenticate, (req, res) => {
   } = req.body;
 
   const newStatus = status || existing.status;
+  if (newStatus !== existing.status && !can(req, 'OCCURRENCES', 'change_status')) {
+    return res.status(403).json({ error: 'Seu perfil não permite alterar o status de ocorrências.' });
+  }
   const resolvedCodes = getResolvedStatusCodes();
   const wasResolved = resolvedCodes.includes(existing.status);
   const nowResolved = resolvedCodes.includes(newStatus);
@@ -2180,7 +2455,6 @@ app.get('/api/rdo/by-date', authenticate, (req, res) => {
   });
 });
 
-const RDO_SIGNER_ROLES = ['ADMIN', 'ENGENHEIRO'];
 const logRdoHistory = (rdoId, user, action, note) => {
   db.prepare('INSERT INTO rdo_history (rdo_id, user_id, user_name, action, note) VALUES (?, ?, ?, ?, ?)').run(
     rdoId,
@@ -2238,15 +2512,18 @@ app.post('/api/rdo', authenticate, (req, res) => {
 
   const existing = db.prepare('SELECT * FROM rdo_records WHERE project_id = ? AND rdo_date = ?').get(pid, rdo_date);
   const requestedStatus = status === 'final' ? 'final' : 'draft';
-  const canSign = RDO_SIGNER_ROLES.includes(req.user.role);
+  // Upsert: folha nova exige "criar"; folha existente exige "editar"
+  if (!can(req, 'RDO', existing ? 'edit' : 'create')) {
+    return res.status(403).json({ error: `Seu perfil não permite ${existing ? 'alterar' : 'cadastrar'} RDO.` });
+  }
 
   // Folha finalizada: bloqueada. Só é possível reabrir (com motivo) por Engenheiro/Administrador.
   if (existing && existing.status === 'final') {
     if (requestedStatus === 'final') {
       return res.status(409).json({ error: 'Esta folha está FINALIZADA e bloqueada para edição. Reabra a folha para fazer correções.' });
     }
-    if (!canSign) {
-      return res.status(403).json({ error: 'Apenas Engenheiros e Administradores podem reabrir um RDO finalizado.' });
+    if (!can(req, 'RDO', 'reopen')) {
+      return res.status(403).json({ error: 'Seu perfil não permite reabrir um RDO finalizado.' });
     }
     const reason = String(reopened_reason || '').trim();
     if (!reason) return res.status(400).json({ error: 'Informe o motivo da reabertura da folha.' });
@@ -2258,8 +2535,8 @@ app.post('/api/rdo', authenticate, (req, res) => {
     return res.json(getRdoFull(pid, rdo_date));
   }
 
-  if (requestedStatus === 'final' && !canSign) {
-    return res.status(403).json({ error: 'Apenas Engenheiros e Administradores podem finalizar o RDO.' });
+  if (requestedStatus === 'final' && !can(req, 'RDO', 'finalize')) {
+    return res.status(403).json({ error: 'Seu perfil não permite finalizar o RDO.' });
   }
 
   // Número da folha é sempre definido pelo servidor (sequencial por obra).
@@ -2514,9 +2791,6 @@ app.delete('/api/rdo/:id', authenticate, (req, res) => {
 
   if (!canUserAccessProject(req.user, existing.project_id)) {
     return res.status(403).json({ error: 'Sem permissão.' });
-  }
-  if (!RDO_SIGNER_ROLES.includes(req.user.role)) {
-    return res.status(403).json({ error: 'Apenas Engenheiros e Administradores podem excluir um RDO.' });
   }
   if (existing.status === 'final') {
     return res.status(409).json({ error: 'Folha FINALIZADA não pode ser excluída. Reabra a folha antes de excluir.' });

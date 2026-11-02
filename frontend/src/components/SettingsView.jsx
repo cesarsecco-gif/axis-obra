@@ -21,9 +21,12 @@ import {
   AlignCenter,
   AlignRight,
   Type,
-  Download
+  Download,
+  KeyRound,
+  Database
 } from 'lucide-react';
-import { apiRequest, getStoredToken } from '../api';
+import { apiRequest, getStoredToken, can } from '../api';
+import RolesSettings from './RolesSettings';
 
 const PARAM_GROUPS = [
   { key: 'TYPE', label: '1. Categoria / Tipo de Ocorrência' },
@@ -33,7 +36,10 @@ const PARAM_GROUPS = [
 ];
 
 export default function SettingsView({ projects, selectedProjectId, currentUser }) {
-  const [activeTab, setActiveTab] = useState('CONTRACT'); // 'CONTRACT' | 'REPORT_BANNER' | 'OCCURRENCE_FIELDS'
+  const [activeTab, setActiveTab] = useState('CONTRACT');
+  const canEditSettings = can(currentUser, 'SETTINGS', 'edit');
+  const canManageRoles = can(currentUser, 'SETTINGS', 'manage_roles');
+  const canBackup = can(currentUser, 'SETTINGS', 'backup'); // 'CONTRACT' | 'REPORT_BANNER' | 'OCCURRENCE_FIELDS'
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
@@ -207,24 +213,6 @@ export default function SettingsView({ projects, selectedProjectId, currentUser 
 
   return (
     <div className="space-y-6">
-      {currentUser?.role === 'ADMIN' && (
-        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <h3 className="text-sm font-bold text-slate-900">Backup do banco de dados</h3>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Baixa uma cópia completa dos dados (obras, RDOs, ocorrências, usuários...). As fotos ficam na pasta de uploads do servidor.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={handleDownloadBackup}
-            className="shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold"
-          >
-            <Download className="w-4 h-4" /> Baixar backup
-          </button>
-        </div>
-      )}
-
       {/* Header */}
       <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
@@ -241,7 +229,7 @@ export default function SettingsView({ projects, selectedProjectId, currentUser 
           </div>
         </div>
 
-        {activeTab !== 'OCCURRENCE_FIELDS' && (
+        {canEditSettings && (activeTab === 'CONTRACT' || activeTab === 'REPORT_BANNER') && (
           <button
             type="button"
             onClick={handleSaveContractSettings}
@@ -309,7 +297,57 @@ export default function SettingsView({ projects, selectedProjectId, currentUser 
           <Sliders className="w-4 h-4 shrink-0" />
           3. Campos Personalizáveis de Ocorrências
         </button>
+
+        {canManageRoles && (
+          <button
+            type="button"
+            onClick={() => setActiveTab('ROLES')}
+            className={`px-3.5 sm:px-5 py-3 text-xs font-bold border-b-2 flex items-center gap-2 whitespace-nowrap shrink-0 transition ${
+              activeTab === 'ROLES'
+                ? 'border-amber-500 text-amber-700 bg-amber-50/40'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <KeyRound className="w-4 h-4 shrink-0" />
+            4. Perfis de Acesso
+          </button>
+        )}
+
+        {canBackup && (
+          <button
+            type="button"
+            onClick={() => setActiveTab('BACKUP')}
+            className={`px-3.5 sm:px-5 py-3 text-xs font-bold border-b-2 flex items-center gap-2 whitespace-nowrap shrink-0 transition ${
+              activeTab === 'BACKUP'
+                ? 'border-amber-500 text-amber-700 bg-amber-50/40'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <Database className="w-4 h-4 shrink-0" />
+            5. Backup
+          </button>
+        )}
       </div>
+
+      {activeTab === 'ROLES' && canManageRoles && <RolesSettings currentUser={currentUser} />}
+
+      {activeTab === 'BACKUP' && canBackup && (
+        <div className="bg-white p-6 rounded-b-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h3 className="text-sm font-bold text-slate-900">Backup do banco de dados</h3>
+            <p className="text-xs text-slate-600 mt-1">
+              Baixa uma cópia completa dos dados (obras, RDOs, ocorrências, contas, perfis...). As fotos ficam na pasta de uploads do servidor e devem ser copiadas pelo servidor.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleDownloadBackup}
+            className="shrink-0 inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-sm font-bold"
+          >
+            <Download className="w-4 h-4" /> Baixar backup
+          </button>
+        </div>
+      )}
 
       {/* =========================================================================
           TAB 1: CONTRATO E PARTICIPANTES (RDO & RELATÓRIOS)

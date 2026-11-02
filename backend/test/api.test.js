@@ -338,3 +338,186 @@ test('backup do banco disponível somente para ADMIN', async () => {
   const enc = await login('joao@axisobra.com.br');
   assert.equal((await api('/api/admin/backup', { token: enc })).status, 403);
 });
+
+// ---------------------------------------------------------------------------
+// Perfis de acesso configuráveis e Gestão de Contas
+// ---------------------------------------------------------------------------
+const emptyPerms = () => ({});
+
+test('lista de perfis traz os 4 perfis padrão e os módulos', async () => {
+  const enc = await login('joao@axisobra.com.br');
+  const res = await api('/api/roles', { token: enc });
+  assert.equal(res.status, 200);
+  const keys = res.data.roles.map((r) => r.key);
+  for (const k of ['ADMIN', 'ENGENHEIRO', 'ENCARREGADO', 'FISCAL']) assert.ok(keys.includes(k));
+  assert.ok(res.data.modules.some((m) => m.key === 'ACCOUNTS'));
+});
+
+test('perfil personalizado: cria, aplica permissões e não pode ser excluído em uso', async () => {
+  const admin = await login('cesarsecco@gmail.com');
+  const enc = await login('joao@axisobra.com.br');
+
+  // Sem "manage_roles" não cria perfis
+  assert.equal((await api('/api/roles', { method: 'POST', token: enc, body: { name: 'X' } })).status, 403);
+
+  const created = await api('/api/roles', {
+    method: 'POST',
+    token: admin,
+    body: {
+      name: 'Técnico de Segurança',
+      color: '#db2777',
+      scope: 'LINKED',
+      permissions: {
+        DASHBOARD: { view: true },
+        OCCURRENCES: { view: true, create: true, edit: true, special: { change_status: true } },
+        EMPLOYEES: { view: true, edit: true },
+        EQUIPMENTS: { view: true },
+        RDO: { view: true }
+      }
+    }
+  });
+  assert.equal(created.status, 201);
+  const key = created.data.key;
+  assert.match(key, /^P_TECNICO_DE_SEGURANCA_/);
+
+  const acc = await api('/api/users', {
+    method: 'POST',
+    token: admin,
+    body: {
+      name: 'Rafael Tonin',
+      email: 'rafael@exemplo.com',
+      first_access: 'PASSWORD',
+      password: 'tecnico123',
+      role: key,
+      job_title: 'Técnico de Segurança do Trabalho',
+      employment_type: 'TERCEIRIZADO',
+      cpf: '123.456.789-09',
+      assignments: [{ project_id: 1, role_in_project: 'TST frente norte', since_date: '2026-10-01' }]
+    }
+  });
+  assert.equal(acc.status, 201);
+  assert.equal(acc.data.must_change_password, 1);
+  assert.equal(acc.data.projects[0].role_in_project, 'TST frente norte');
+
+  const tst = await login('rafael@exemplo.com', 'tecnico123');
+  const me = await api('/api/auth/me', { token: tst });
+  assert.equal(me.data.user.role_info.name, 'Técnico de Segurança');
+
+  // Pode ver e registrar ocorrências; não pode excluir; não acessa pluviometria nem contas
+  assert.equal((await api('/api/occurrences', { token: tst })).status, 200);
+  assert.equal((await api('/api/occurrences/1', { method: 'DELETE', token: tst })).status, 403);
+  assert.equal((await api('/api/pluviometry', { token: tst })).status, 403);
+  assert.equal((await api('/api/users', { token: tst })).status, 403);
+  // RDO somente consulta
+  assert.equal(
+    (await api('/api/rdo', { method: 'POST', token: tst, body: { project_id: 1, rdo_date: '2026-08-01' } })).status,
+    403
+  );
+  // Custos ocultos (sem "ver custos")
+  const eq = await api('/api/equipments', { token: tst });
+  assert.equal(eq.status, 200);
+  assert.ok(eq.data.length > 0 && eq.data.every((e) => e.daily_cost === null));
+
+  // Perfil em uso não pode ser excluído
+  assert.equal((await api(`/api/roles/${key}`, { method: 'DELETE', token: admin })).status, 409);
+  // Perfil padrão não pode ser excluído
+  assert.equal((await api('/api/roles/FISCAL', { method: 'DELETE', token: admin })).status, 400);
+  // Administrador não pode ser alterado
+  assert.equal(
+    (await api('/api/roles/ADMIN', { method: 'PUT', token: admin, body: { permissions: emptyPerms() } })).status,
+    400
+  );
+
+  // Alterar o perfil vale na hora: tira "ver" de ocorrências
+  const upd = await api(`/api/roles/${key}`, {
+    method: 'PUT',
+    token: admin,
+    body: { permissions: { DASHBOARD: { view: true }, EMPLOYEES: { view: true } } }
+  });
+  assert.equal(upd.status, 200);
+  assert.equal((await api('/api/occurrences', { token: tst })).status, 403);
+});
+
+test('alterar status de ocorrência exige a ação especial', async () => {
+  const admin = await login('cesarsecco@gmail.com');
+  const role = await api('/api/roles', {
+    method: 'POST',
+    token: admin,
+    body: { name: 'Apontador', permissions: { OCCURRENCES: { view: true, create: true, edit: true } } }
+  });
+  await api('/api/users', {
+    method: 'POST',
+    token: admin,
+    body: { name: 'Apontador Teste', email: 'apontador@exemplo.com', password: 'apont123', role: role.data.key, assignments: [{ project_id: 1 }] }
+  });
+  const t = await login('apontador@exemplo.com', 'apont123');
+  const list = await api('/api/occurrences?projectId=1', { token: t });
+  const occ = list.data.find((o) => o.status !== 'RESOLVIDA');
+  const res = await api(`/api/occurrences/${occ.id}`, { method: 'PUT', token: t, body: { ...occ, status: 'RESOLVIDA' } });
+  assert.equal(res.status, 403);
+  const ok = await api(`/api/occurrences/${occ.id}`, { method: 'PUT', token: t, body: { ...occ, title: occ.title + ' (rev)' } });
+  assert.equal(ok.status, 200);
+});
+
+test('conta criada por convite: código do e-mail cria a senha e encerra o convite pendente', async () => {
+  const admin = await login('cesarsecco@gmail.com');
+  const email = 'convidada@exemplo.com';
+  const acc = await api('/api/users', {
+    method: 'POST',
+    token: admin,
+    body: { name: 'Juliana Matos', email, role: 'ENCARREGADO', first_access: 'INVITE' }
+  });
+  assert.equal(acc.status, 201);
+  assert.equal(acc.data.invite_pending, 1);
+  const code = await waitForCode(email, 'INVITE');
+  assert.match(serverLog, /convite=1&email=convidada%40exemplo\.com&codigo=\d{6}/);
+
+  const set = await api('/api/auth/reset-password', { method: 'POST', body: { email, code, newPassword: 'minhaSenha1' } });
+  assert.equal(set.status, 200);
+  await login(email, 'minhaSenha1');
+  const after = await api(`/api/users/${acc.data.id}`, { token: admin });
+  assert.equal(after.data.invite_pending, 0);
+  assert.ok(after.data.last_login_at);
+});
+
+test('conta com prazo de acesso vencido não entra', async () => {
+  const admin = await login('cesarsecco@gmail.com');
+  const acc = await api('/api/users', {
+    method: 'POST',
+    token: admin,
+    body: { name: 'Temporário', email: 'temp@exemplo.com', password: 'temp1234', role: 'FISCAL', access_expires_at: '2026-12-31' }
+  });
+  const t = await login('temp@exemplo.com', 'temp1234');
+  await api(`/api/users/${acc.data.id}`, { method: 'PUT', token: admin, body: { access_expires_at: '2020-01-01' } });
+  assert.equal((await api('/api/auth/login', { method: 'POST', body: { email: 'temp@exemplo.com', password: 'temp1234' } })).status, 401);
+  assert.equal((await api('/api/projects', { token: t })).status, 401);
+});
+
+test('somente Administrador atribui o perfil Administrador', async () => {
+  const admin = await login('cesarsecco@gmail.com');
+  const role = await api('/api/roles', {
+    method: 'POST',
+    token: admin,
+    body: { name: 'RH', permissions: { ACCOUNTS: { view: true, create: true, edit: true } } }
+  });
+  await api('/api/users', {
+    method: 'POST',
+    token: admin,
+    body: { name: 'RH Teste', email: 'rh@exemplo.com', password: 'rhteste1', role: role.data.key }
+  });
+  const rh = await login('rh@exemplo.com', 'rhteste1');
+  const esc = await api('/api/users', {
+    method: 'POST',
+    token: rh,
+    body: { name: 'Novo Admin', email: 'novo.admin@exemplo.com', password: 'admin123', role: 'ADMIN' }
+  });
+  assert.equal(esc.status, 403);
+  const ok = await api('/api/users', {
+    method: 'POST',
+    token: rh,
+    body: { name: 'Novo Encarregado', email: 'novo.enc@exemplo.com', password: 'enc12345', role: 'ENCARREGADO' }
+  });
+  assert.equal(ok.status, 201);
+  // RH não altera o próprio perfil
+  assert.equal((await api(`/api/roles/${role.data.key}`, { method: 'PUT', token: rh, body: { name: 'RH+' } })).status, 403);
+});

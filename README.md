@@ -11,18 +11,23 @@ Sistema Full-Stack (Node.js/Express + SQLite nativo + React/Vite/Tailwind CSS) p
 3. **Registro de Ocorrências** — não conformidades com fotos por fase, prazos, histórico de status, indicadores de SLA e relatórios.
 4. **Cadastro de Funcionários** — efetivo CLT/terceirizado/PJ, ASO, NRs e diárias.
 5. **Cadastro de Equipamentos** — próprios e locados, custos e manutenção preventiva.
-6. **Obras por Usuário** — cadastro de obras e usuários; cada usuário acessa apenas as obras vinculadas.
+6. **Gestão de Obras** — cadastro das obras, avanço físico e equipe vinculada a cada obra.
 7. **Registro de Pluviometria** — chuva em mm por turno, importação de CSV do INMET, gráficos e quadros analíticos.
-8. **Configurações** — campos de ocorrência, cabeçalhos dos relatórios e backup do banco de dados.
+8. **Configurações** — campos de ocorrência, cabeçalhos dos relatórios, **perfis de acesso** e backup do banco de dados.
+9. **Gestão de Contas** — cadastro completo das pessoas (dados pessoais, contato, dados profissionais, acesso, obras, assinatura), convite por e-mail, validade do acesso e simulação de acesso.
 
-### Perfis de acesso
+### Perfis de acesso (configuráveis)
 
-| Perfil | O que pode fazer |
+Em **Configurações › Perfis de Acesso** é possível criar perfis e definir, para cada módulo, as permissões **Ver, Criar, Editar e Excluir** e as **ações especiais** (finalizar/reabrir/gerar RDO em lote, alterar status de ocorrência, ver custos, vincular equipe, importar INMET, gerenciar perfis, backup, redefinir senhas, simular acesso), além da abrangência (somente obras vinculadas ou todas as obras). O servidor confere essas permissões em todas as rotas.
+
+Perfis padrão (podem ser ajustados, não excluídos):
+
+| Perfil | Configuração inicial |
 | :--- | :--- |
-| `ADMIN` | Tudo, em todas as obras: usuários, permissões, configurações, backup. |
-| `ENGENHEIRO` | Opera as obras vinculadas; finaliza, reabre e exclui RDO; altera configurações de relatórios. |
-| `ENCARREGADO` | Registra fotos, RDO (rascunho), ocorrências e pluviometria nas obras vinculadas. Não finaliza nem exclui RDO. |
-| `FISCAL` | Somente consulta das obras vinculadas. |
+| `Administrador` | Tudo, em todas as obras. Fixo: não pode ser alterado. |
+| `Engenheiro` | Opera as obras vinculadas; finaliza, reabre e exclui RDO; altera configurações de relatórios. |
+| `Encarregado` | Registra fotos, RDO (rascunho), ocorrências e pluviometria nas obras vinculadas. Não finaliza nem exclui RDO. |
+| `Fiscal` | Somente consulta das obras vinculadas. |
 
 ### Acesso
 

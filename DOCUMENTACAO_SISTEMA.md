@@ -94,16 +94,25 @@ Proteções: limite de tentativas de login sem sucesso (por e-mail e por IP), li
 ### 4.2 Administrador principal
 Na inicialização o sistema garante a existência do administrador `cesarsecco@gmail.com` (configurável por `ADMIN_EMAIL`). A senha inicial (`123456`, ou `ADMIN_INITIAL_PASSWORD`) só é definida na criação — **troque-a no primeiro acesso** em *Alterar Senha*.
 
-### 4.3 Perfis
+### 4.3 Perfis de acesso configuráveis
 
-| Perfil | Permissões |
+Cada conta tem um **perfil de acesso** (tabela `roles`). Em **Configurações › Perfis de Acesso** é possível criar, duplicar, editar e excluir perfis. Cada perfil define:
+
+- **Abrangência:** somente as obras vinculadas à conta, ou todas as obras.
+- **Permissões por módulo:** Ver, Criar, Editar e Excluir (sem "Ver", as demais não valem).
+- **Ações especiais:** Registro Fotográfico (exportar relatório); RDO (finalizar folha, reabrir folha, gerar em lote); Ocorrências (alterar status, exportar relatório); Funcionários (ver valores de diária); Equipamentos (ver custos); Gestão de Obras (vincular equipe); Pluviometria (importar INMET); Configurações (perfis de acesso, backup); Gestão de Contas (redefinir senhas, simular acesso).
+- **Modelos prontos:** "Somente consulta", "Operacional de campo" e "Gestor da obra" (copiam os perfis Fiscal, Encarregado e Engenheiro).
+
+Regras: o perfil **Administrador** é fixo (acesso total); perfis padrão não podem ser excluídos; um perfil em uso não pode ser excluído; ninguém altera o próprio perfil (exceto o Administrador); só um Administrador atribui o perfil Administrador ou altera a conta de um Administrador. O servidor confere as permissões em todas as rotas (`backend/src/permissions.js`); valores de custo são omitidos das respostas quando o perfil não tem "ver custos".
+
+| Perfil padrão | Configuração inicial |
 | :--- | :--- |
-| `ADMIN` | Acesso a todas as obras. Cadastra/edita/desativa usuários, define senhas, vincula obras, simula o acesso de outro usuário, baixa backup. |
-| `ENGENHEIRO` | Obras vinculadas. Finaliza, reabre (com motivo) e exclui RDO. Altera configurações de relatórios e campos de ocorrência. |
-| `ENCARREGADO` | Obras vinculadas. Registra fotos, ocorrências, pluviometria, efetivo, equipamentos e RDO em rascunho. |
-| `FISCAL` | Obras vinculadas, **somente consulta**. |
+| `ADMIN` — Administrador | Tudo, em todas as obras. |
+| `ENGENHEIRO` — Engenheiro | Obras vinculadas. Finaliza, reabre (com motivo) e exclui RDO. Altera configurações de relatórios e campos de ocorrência. |
+| `ENCARREGADO` — Encarregado | Obras vinculadas. Registra fotos, ocorrências, pluviometria, efetivo, equipamentos e RDO em rascunho. |
+| `FISCAL` — Fiscal | Obras vinculadas, **somente consulta**. |
 
-**Simular acesso:** em *Obras por Usuário*, o Administrador pode ver o sistema exatamente como outro usuário vê. Uma faixa amarela indica a simulação e permite voltar ao Administrador.
+**Simular acesso:** em *Gestão de Contas › Editar conta*, quem tem a ação "Simular acesso" vê o sistema exatamente como outra pessoa vê. Uma faixa amarela indica a simulação e permite voltar.
 
 ---
 
@@ -129,26 +138,33 @@ Nome, CPF, matrícula, função, regime (CLT/terceirizado/PJ), empresa, diária,
 ### 5.5 Módulo 5 — Cadastro de Equipamentos
 TAG, nome, categoria, marca/modelo/série, próprio ou locado, locadora, custo diário, status e datas de manutenção.
 
-### 5.6 Módulo 6 — Obras por Usuário
-Cadastro de obras e matriz de acesso usuário × obra. Administrador cria usuários (senha inicial opcional), edita dados e perfil, desativa/reativa e define nova senha.
+### 5.6 Módulo 6 — Gestão de Obras
+Cadastro das obras, avanço físico e **equipe por obra** (vincular/desvincular pessoas com a ação "Vincular equipe").
 
 ### 5.7 Módulo 7 — Registro de Pluviometria
 Clima por turno, chuva em mm (total e por turno), temperaturas, impacto e horas paradas; importação de CSV do INMET; gráficos diário/mensal; quadros analíticos em PDF/Excel.
 
 ### 5.8 Módulo 8 — Configurações do Sistema
-Opções dos campos de ocorrência (com restauração do padrão), dados do contrato e cabeçalhos dos relatórios, e **backup do banco de dados** (Administrador).
+Opções dos campos de ocorrência (com restauração do padrão), dados do contrato e cabeçalhos dos relatórios, **Perfis de Acesso** (seção 4.3) e **Backup** do banco de dados.
+
+### 5.9 Módulo 9 — Gestão de Contas
+- **Lista:** indicadores (contas ativas, convites pendentes, inativas, acessos expirando), filtros por busca, perfil, situação e obra, último acesso e situação de cada conta.
+- **Cadastro completo:** dados pessoais (nome, nome de exibição, CPF, nascimento); contato (e-mail de acesso, celular, telefone alternativo); dados profissionais (vínculo, empresa, cargo, matrícula, conselho/número/UF); acesso (perfil, validade do acesso, primeiro acesso por **convite por e-mail** ou **senha definida agora** com troca obrigatória no 1º login); obras vinculadas com **função na obra** e data de início; foto, **assinatura para RDO** e observações.
+- **Ações:** reenviar convite, simular acesso, definir nova senha, ativar/desativar.
+- O convite é um e-mail com link e código válido por 7 dias; o link abre a tela "Criar sua senha".
 
 ---
 
 ## 6. Modelagem do Banco de Dados (SQLite)
 
-Arquivo `backend/data/axis_obra.db` — 15 tabelas, `FOREIGN KEYS = ON`. Migrações são **aditivas** (`ensure*Columns`) e rodam a cada inicialização.
+Arquivo `backend/data/axis_obra.db` — 16 tabelas, `FOREIGN KEYS = ON`. Migrações são **aditivas** (`ensure*Columns`) e rodam a cada inicialização.
 
 | Tabela | Conteúdo |
 | :--- | :--- |
-| `users` | Usuários (`role`, `active`, `password_hash` no formato `scrypt$salt$hash`). |
+| `users` | Contas: dados pessoais e profissionais, `role` (chave do perfil), `active`, validade do acesso, convite pendente, troca de senha obrigatória, último acesso, foto e assinatura; `password_hash` em `scrypt$salt$hash`. |
+| `roles` | Perfis de acesso: nome, cor, abrangência (`LINKED`/`ALL`), permissões em JSON, perfil padrão ou não. |
 | `projects` | Obras. |
-| `project_users` | Vínculo N:N usuário × obra. |
+| `project_users` | Vínculo N:N usuário × obra, com função na obra e data de início. |
 | `employees` | Funcionários. |
 | `equipments` | Equipamentos. |
 | `photos` | Registro fotográfico. |
@@ -160,7 +176,7 @@ Arquivo `backend/data/axis_obra.db` — 15 tabelas, `FOREIGN KEYS = ON`. Migraç
 | `report_settings` | Linha única com cabeçalhos/dados do contrato para relatórios. |
 | `rdo_records` | RDOs (único por obra+data e por obra+folha; `status` = `draft`/`final`). |
 | `rdo_history` | Histórico do RDO (CRIADO, FINALIZADO, REABERTO). |
-| `auth_codes` | Códigos de acesso/recuperação (somente o hash, com validade e tentativas). |
+| `auth_codes` | Códigos de acesso, recuperação e convite (somente o hash, com validade e tentativas). |
 
 ---
 
@@ -178,18 +194,23 @@ Todas as rotas, exceto as marcadas como públicas, exigem `Authorization: Bearer
 | `POST` | `/api/auth/reset-password` | Público. Nova senha com `email`, `code` e `newPassword`. |
 | `GET` | `/api/auth/me` | Usuário logado e obras permitidas. |
 | `PUT` | `/api/auth/password` | Alterar a própria senha (`currentPassword`, `newPassword`). |
-| `POST` | `/api/auth/impersonate` | ADMIN. Simular acesso de outro usuário (`userId`). |
+| `POST` | `/api/auth/impersonate` | Ação "Simular acesso". Simular acesso de outro usuário (`userId`). |
 | `POST` | `/api/auth/stop-impersonation` | Encerrar simulação e voltar ao ADMIN. |
-| `GET` | `/api/admin/backup` | ADMIN. Download do banco de dados. |
+| `GET` | `/api/admin/backup` | Ação "Backup". Download do banco de dados. |
+| `GET` | `/api/roles` | Perfis de acesso e módulos/ações disponíveis. |
+| `POST` | `/api/roles` | Ação "Perfis de acesso". Criar perfil. |
+| `PUT / DELETE` | `/api/roles/:key` | Ação "Perfis de acesso". Alterar / excluir perfil. |
 | `GET` | `/api/dashboard` | Indicadores consolidados (`?projectId=`). |
 | `GET / POST` | `/api/projects` | Listar obras permitidas / cadastrar (ADMIN). |
 | `PUT / DELETE` | `/api/projects/:id` | Atualizar / remover obra (ADMIN). |
 | `POST` | `/api/projects/:id/users` | Vincular usuário à obra (ADMIN). |
 | `DELETE` | `/api/projects/:id/users/:userId` | Desvincular (ADMIN). |
-| `GET / POST` | `/api/users` | ADMIN. Listar / cadastrar usuários. |
-| `PUT` | `/api/users/:id` | ADMIN. Editar dados, perfil e ativo/inativo. |
-| `PUT` | `/api/users/:id/password` | ADMIN. Definir nova senha. |
-| `PUT` | `/api/users/:id/projects` | ADMIN. Redefinir obras do usuário. |
+| `GET / POST` | `/api/users` | Gestão de Contas. Listar / cadastrar contas (cadastro completo, `assignments`, `first_access`: `INVITE` ou `PASSWORD`). |
+| `GET` | `/api/users/:id` | Gestão de Contas. Dados da conta. |
+| `POST` | `/api/users/:id/invite` | Gestão de Contas (editar). Reenviar convite. |
+| `PUT` | `/api/users/:id` | Gestão de Contas (editar). Dados, perfil, obras, ativo/inativo. |
+| `PUT` | `/api/users/:id/password` | Ação "Redefinir senhas". Nova senha (troca obrigatória no próximo acesso). |
+| `PUT` | `/api/users/:id/projects` | Ação "Vincular equipe". Redefinir obras do usuário. |
 | `GET / POST` | `/api/employees` | Funcionários. |
 | `PUT / DELETE` | `/api/employees/:id` | Funcionário. |
 | `GET / POST` | `/api/equipments` | Equipamentos. |
@@ -237,6 +258,7 @@ Códigos de erro usuais: `400` dados inválidos, `401` sessão inválida/expirad
 | `TOKEN_SECRET` | recomendada | Segredo das sessões. Sem ela, é gerado e salvo em `backend/data/.token_secret`. |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | para login por código e recuperação | Servidor de e-mail. Sem `SMTP_HOST` em produção, essas opções ficam ocultas. |
 | `ADMIN_EMAIL`, `ADMIN_NAME`, `ADMIN_INITIAL_PASSWORD` | não | Administrador principal. |
+| `APP_URL` | não | Endereço público do sistema usado no link do convite (padrão: o endereço da requisição). |
 | `CORS_ORIGIN` | não | Domínios autorizados se o frontend estiver em outro domínio. |
 | `DATA_DIR`, `UPLOADS_DIR`, `DB_PATH` | não | Caminhos alternativos de dados. |
 

@@ -23,7 +23,7 @@ import {
   CalendarDays,
   FileStack
 } from 'lucide-react';
-import { apiRequest, formatDateBR } from '../api';
+import { apiRequest, formatDateBR, can } from '../api';
 
 const WEEKDAYS = [
   { key: 0, label: 'DOM' },
@@ -78,6 +78,13 @@ function parseServices(raw) {
 }
 
 export default function RdoView({ projects, selectedProjectId, currentUser }) {
+  // Permissões do perfil de acesso (o servidor também confere)
+  const canCreateRdo = can(currentUser, 'RDO', 'create');
+  const canEditRdo = can(currentUser, 'RDO', 'edit');
+  const canDeleteRdo = can(currentUser, 'RDO', 'delete');
+  const canFinalizeRdo = can(currentUser, 'RDO', 'finalize');
+  const canReopenRdo = can(currentUser, 'RDO', 'reopen');
+  const canBatchRdo = can(currentUser, 'RDO', 'batch');
   const [targetProjectId, setTargetProjectId] = useState(
     selectedProjectId !== 'ALL' ? selectedProjectId : (projects[0]?.id || '')
   );
@@ -1572,6 +1579,7 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
 
         {/* Global Batch & Export buttons */}
         <div className="grid grid-cols-1 sm:flex sm:flex-wrap items-center gap-2 w-full lg:w-auto">
+          {canBatchRdo && (
           <button
             type="button"
             onClick={handleOpenBatchModal}
@@ -1580,6 +1588,7 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
             <Sparkles className="w-4 h-4 text-amber-300" />
             Gerar RDOs em Lote
           </button>
+          )}
 
           <button
             type="button"
@@ -1942,7 +1951,7 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
               Fotos no dia: <strong className="text-slate-900">{rdoData.photos_count || 0}</strong>
             </span>
 
-            {dayExists && (
+            {dayExists && canDeleteRdo && !isLocked && (
               <button
                 type="button"
                 onClick={handleDeleteRdo}
@@ -1957,7 +1966,7 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
 
         {/* Action Buttons for current day */}
         <div className="grid grid-cols-1 sm:flex sm:flex-wrap items-center gap-2 w-full md:w-auto">
-          {dayExists && !isLocked && (
+          {dayExists && !isLocked && canEditRdo && (
             <>
               <button
                 type="button"
@@ -1980,6 +1989,7 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
                 Salvar Rascunho
               </button>
 
+              {canFinalizeRdo && (
               <button
                 type="button"
                 onClick={handleFinalizeRdo}
@@ -1989,10 +1999,11 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
                 <Check className="w-4 h-4 text-emerald-200" />
                 Finalizar RDO
               </button>
+              )}
             </>
           )}
 
-          {dayExists && isLocked && (
+          {dayExists && isLocked && canReopenRdo && (
             <button
               type="button"
               onClick={handleReopenRdo}
@@ -2051,8 +2062,8 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
             <button
               type="button"
               onClick={handleCreateRdoForCurrentDate}
-              disabled={saving || batchActionLoading}
-              className="p-4 rounded-xl border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-950 font-bold text-xs flex flex-col items-center justify-between gap-2 shadow-xs transition group text-center"
+              disabled={saving || batchActionLoading || !canCreateRdo}
+              className="disabled:opacity-50 disabled:cursor-not-allowed p-4 rounded-xl border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-950 font-bold text-xs flex flex-col items-center justify-between gap-2 shadow-xs transition group text-center"
             >
               <div className="flex items-center gap-1.5 text-emerald-700 font-black">
                 <Plus className="w-4 h-4" />
@@ -2070,8 +2081,8 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
             <button
               type="button"
               onClick={handleGenerateRdoForPhotoDaysInPeriod}
-              disabled={saving || batchActionLoading}
-              className="p-4 rounded-xl border border-sky-300 bg-sky-50 hover:bg-sky-100 text-sky-950 font-bold text-xs flex flex-col items-center justify-between gap-2 shadow-xs transition group text-center"
+              disabled={saving || batchActionLoading || !canBatchRdo}
+              className="disabled:opacity-50 disabled:cursor-not-allowed p-4 rounded-xl border border-sky-300 bg-sky-50 hover:bg-sky-100 text-sky-950 font-bold text-xs flex flex-col items-center justify-between gap-2 shadow-xs transition group text-center"
             >
               <div className="flex items-center gap-1.5 text-sky-700 font-black">
                 <Sparkles className="w-4 h-4" />
@@ -2089,8 +2100,8 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
             <button
               type="button"
               onClick={handleGenerateCompleteRdoForEveryDayInPeriod}
-              disabled={saving || batchActionLoading}
-              className="p-4 rounded-xl border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-950 font-bold text-xs flex flex-col items-center justify-between gap-2 shadow-xs transition group text-center"
+              disabled={saving || batchActionLoading || !canBatchRdo}
+              className="disabled:opacity-50 disabled:cursor-not-allowed p-4 rounded-xl border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-950 font-bold text-xs flex flex-col items-center justify-between gap-2 shadow-xs transition group text-center"
             >
               <div className="flex items-center gap-1.5 text-amber-800 font-black">
                 <FileStack className="w-4 h-4 text-amber-600" />

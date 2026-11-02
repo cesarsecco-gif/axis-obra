@@ -9,13 +9,10 @@ import {
   Calendar,
   Check,
   X,
-  UserPlus,
-  LogIn,
   Lock,
   Briefcase
 } from 'lucide-react';
-import { apiRequest, formatCurrency, formatDateBR } from '../api';
-import EditUserModal from './EditUserModal';
+import { apiRequest, formatCurrency, formatDateBR, can } from '../api';
 
 const PROJECT_STATUSES = {
   PLANEJAMENTO: { label: 'Em Planejamento', badge: 'bg-sky-100 text-sky-800 border-sky-300' },
@@ -33,8 +30,7 @@ const ROLE_LABELS = {
 
 export default function ProjectsUsersView({
   currentUser,
-  onProjectsUpdated,
-  onSwitchUser
+  onProjectsUpdated
 }) {
   const [activeTab, setActiveTab] = useState('PROJECTS'); // 'PROJECTS' | 'USERS_MATRIX'
   const [projects, setProjects] = useState([]);
@@ -43,11 +39,12 @@ export default function ProjectsUsersView({
 
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [editingProject, setEditingProject] = useState(null);
-  const [showUserModal, setShowUserModal] = useState(false);
-  const [editingUser, setEditingUser] = useState(null);
   const [error, setError] = useState('');
 
-  const isAdmin = currentUser?.role === 'ADMIN';
+  const canCreateProject = can(currentUser, 'PROJECTS', 'create');
+  const canEditProject = can(currentUser, 'PROJECTS', 'edit');
+  const canLinkTeam = can(currentUser, 'PROJECTS', 'link_team');
+  const allProjectsAccess = currentUser?.permissions === 'ALL' || currentUser?.role_info?.scope === 'ALL';
 
   const initialProjectForm = {
     code: '',
@@ -68,18 +65,6 @@ export default function ProjectsUsersView({
 
   const [projectForm, setProjectForm] = useState(initialProjectForm);
 
-  const initialUserForm = {
-    name: '',
-    email: '',
-    password: '',
-    role: 'ENGENHEIRO',
-    crea_cft: '',
-    phone: '',
-    role_in_project: 'Engenheiro Residente',
-    projectIds: []
-  };
-
-  const [userForm, setUserForm] = useState(initialUserForm);
 
   const loadData = async () => {
     setLoading(true);
@@ -87,7 +72,7 @@ export default function ProjectsUsersView({
       // A lista completa de usuários é restrita ao Administrador
       const [projData, usersData] = await Promise.all([
         apiRequest('/api/projects'),
-        isAdmin ? apiRequest('/api/users') : Promise.resolve([currentUser])
+        canLinkTeam || can(currentUser, 'ACCOUNTS') ? apiRequest('/api/users') : Promise.resolve([currentUser])
       ]);
       setProjects(projData);
       setUsers(usersData);
@@ -157,26 +142,9 @@ export default function ProjectsUsersView({
     }
   };
 
-  const handleCreateUser = async (e) => {
-    e.preventDefault();
-    setError('');
-    try {
-      await apiRequest('/api/users', {
-        method: 'POST',
-        body: JSON.stringify(userForm)
-      });
-      setShowUserModal(false);
-      setUserForm(initialUserForm);
-      await loadData();
-      if (onProjectsUpdated) onProjectsUpdated();
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-
   const handleToggleUserProject = async (projectId, user, isCurrentlyAssigned) => {
-    if (!isAdmin) {
-      alert('Apenas usuários com perfil ADMIN podem alterar vínculos de acesso às obras.');
+    if (!canLinkTeam) {
+      alert('Seu perfil não permite alterar a equipe das obras.');
       return;
     }
     try {
@@ -210,10 +178,10 @@ export default function ProjectsUsersView({
             <div className="p-2 rounded-lg bg-amber-500/10 text-amber-600">
               <Building2 className="w-6 h-6" />
             </div>
-            <h2 className="text-xl font-bold text-slate-900">5. Gerenciamento de Obras por Usuário e Permissões</h2>
+            <h2 className="text-xl font-bold text-slate-900">6. Gestão de Obras</h2>
           </div>
           <p className="text-sm text-slate-500 mt-1">
-            Controle de obras ativas, progresso físico e matriz de vínculo de acesso por usuário (Admin vs Engenheiros/Encarregados).
+            Cadastro das obras, avanço físico e equipe vinculada a cada obra. As contas de usuário ficam no Módulo 9 — Gestão de Contas.
           </p>
         </div>
 
@@ -227,7 +195,7 @@ export default function ProjectsUsersView({
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Obras Vinculadas ({projects.length})
+              Obras ({projects.length})
             </button>
             <button
               onClick={() => setActiveTab('USERS_MATRIX')}
@@ -237,43 +205,30 @@ export default function ProjectsUsersView({
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Matriz de Acesso por Usuário ({users.length})
+              Equipe por Obra ({users.filter((u) => u.active !== 0).length})
             </button>
           </div>
 
-          {isAdmin && (
-            <>
-              <button
-                onClick={openCreateProject}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-semibold text-xs shadow-sm transition"
-              >
-                <Plus className="w-4 h-4" />
-                Nova Obra
-              </button>
-              <button
-                onClick={() => {
-                  setError('');
-                  setShowUserModal(true);
-                }}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs shadow-sm transition"
-              >
-                <UserPlus className="w-4 h-4" />
-                Novo Usuário
-              </button>
-            </>
+          {canCreateProject && (
+            <button
+              onClick={openCreateProject}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-semibold text-xs shadow-sm transition"
+            >
+              <Plus className="w-4 h-4" />
+              Nova Obra
+            </button>
           )}
         </div>
       </div>
 
       {/* Permission Banner for Non-Admin */}
-      {!isAdmin && (
+      {!allProjectsAccess && (
         <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 flex items-start gap-3">
           <Lock className="w-5 h-5 text-indigo-600 shrink-0 mt-0.5" />
           <div className="text-xs text-indigo-900 leading-relaxed">
             <strong>Modo de Acesso Restrito por Obra Ativo:</strong> Você está autenticado como{' '}
-            <strong>{currentUser.name}</strong> ({currentUser.role}). Você visualiza e opera exclusivamente nas{' '}
-            <strong>{projects.length} obra(s)</strong> às quais foi vinculado pela Administração. Para gerenciar todas as
-            obras ou alterar permissões, alterne para o perfil <strong>Administrador</strong> no topo da página.
+            <strong>{currentUser.name}</strong> ({currentUser.role_info?.name || currentUser.role}). Você visualiza e opera
+            exclusivamente nas <strong>{projects.length} obra(s)</strong> às quais foi vinculado.
           </div>
         </div>
       )}
@@ -307,6 +262,7 @@ export default function ProjectsUsersView({
                       <p className="text-xs font-medium text-slate-500">Cliente: {proj.client}</p>
                     </div>
 
+                    {canEditProject && (
                     <button
                       onClick={() => openEditProject(proj)}
                       className="p-2 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition"
@@ -314,6 +270,7 @@ export default function ProjectsUsersView({
                     >
                       <Edit3 className="w-4 h-4" />
                     </button>
+                    )}
                   </div>
 
                   {proj.description && (
@@ -370,7 +327,7 @@ export default function ProjectsUsersView({
                       <Users className="w-3.5 h-3.5 text-amber-600" />
                       Usuários com Acesso a esta Obra ({(proj.assignedUsers || []).length})
                     </span>
-                    {isAdmin && (
+                    {canLinkTeam && (
                       <button
                         onClick={() => setActiveTab('USERS_MATRIX')}
                         className="text-xs font-semibold text-amber-600 hover:text-amber-700 underline"
@@ -404,12 +361,12 @@ export default function ProjectsUsersView({
             <div>
               <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
                 <Shield className="w-5 h-5 text-amber-600" />
-                Matriz de Permissões: Obras Vinculadas por Usuário
+                Equipe por Obra
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                {isAdmin
-                  ? 'Clique nos botões das obras abaixo para vincular ou desvincular o acesso de cada Engenheiro/Encarregado instantaneamente.'
-                  : 'Visualização dos usuários e suas respectivas obras vinculadas.'}
+                {canLinkTeam
+                  ? 'Clique nas obras para vincular ou desvincular cada pessoa. O que cada uma pode fazer é definido pelo perfil de acesso.'
+                  : 'Pessoas e obras às quais estão vinculadas.'}
               </p>
             </div>
           </div>
@@ -421,12 +378,12 @@ export default function ProjectsUsersView({
                   <th className="py-3.5 px-4">Usuário / Credencial</th>
                   <th className="py-3.5 px-4">Perfil de Acesso</th>
                   <th className="py-3.5 px-4">Obras Vinculadas (Clique para Ativar/Desativar Vínculo)</th>
-                  <th className="py-3.5 px-4 text-right">Testar Perfil</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 text-sm">
-                {users.map((u) => {
-                  const roleInfo = ROLE_LABELS[u.role] || ROLE_LABELS.ENGENHEIRO;
+                {users.filter((u) => u.active !== 0).map((u) => {
+                  const roleInfo = u.role_info || { name: u.role, color: '#475569' };
+                  const fullAccess = u.role === 'ADMIN' || roleInfo.scope === 'ALL';
                   const userProjIds = (u.projects || []).map((p) => Number(p.id));
                   const isCurrent = Number(u.id) === Number(currentUser?.id);
 
@@ -454,16 +411,16 @@ export default function ProjectsUsersView({
                       </td>
 
                       <td className="py-4 px-4">
-                        <span className={`inline-block px-2.5 py-1 rounded-md text-xs ${roleInfo.badge}`}>
-                          {roleInfo.label}
+                        <span className="inline-block px-2.5 py-1 rounded-md text-xs font-bold text-white" style={{ background: roleInfo.color }}>
+                          {roleInfo.name}
                         </span>
                       </td>
 
                       <td className="py-4 px-4">
-                        {u.role === 'ADMIN' ? (
+                        {fullAccess ? (
                           <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-800 bg-amber-50 px-3 py-1.5 rounded-lg border border-amber-200">
                             <Check className="w-4 h-4 text-amber-600" />
-                            Acesso Irrestrito a Todas as Obras do Sistema
+                            Acesso a Todas as Obras (definido pelo perfil)
                           </span>
                         ) : (
                           <div className="flex flex-wrap gap-2">
@@ -473,15 +430,15 @@ export default function ProjectsUsersView({
                                 <button
                                   key={proj.id}
                                   type="button"
-                                  disabled={!isAdmin}
+                                  disabled={!canLinkTeam}
                                   onClick={() => handleToggleUserProject(proj.id, u, assigned)}
                                   className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition ${
                                     assigned
                                       ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
                                       : 'bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100 hover:text-slate-600'
-                                  } ${!isAdmin ? 'cursor-default' : 'cursor-pointer'}`}
+                                  } ${!canLinkTeam ? 'cursor-default' : 'cursor-pointer'}`}
                                   title={
-                                    isAdmin
+                                    canLinkTeam
                                       ? assigned
                                         ? 'Clique para remover acesso a esta obra'
                                         : 'Clique para conceder acesso a esta obra'
@@ -503,27 +460,6 @@ export default function ProjectsUsersView({
                         )}
                       </td>
 
-                      <td className="py-4 px-4 text-right space-y-1.5">
-                        {isAdmin && (
-                          <button
-                            onClick={() => setEditingUser(u)}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-100 text-slate-700 text-xs font-semibold transition mr-1.5"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                            Editar
-                          </button>
-                        )}
-                        {!isCurrent && isAdmin && onSwitchUser && u.active !== 0 && (
-                          <button
-                            onClick={() => onSwitchUser(u.id)}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-amber-500 text-white hover:text-slate-950 text-xs font-semibold transition"
-                            title="Visualizar o sistema com as permissões deste usuário (você pode voltar a qualquer momento)"
-                          >
-                            <LogIn className="w-3.5 h-3.5" />
-                            Simular Acesso
-                          </button>
-                        )}
-                      </td>
                     </tr>
                   );
                 })}
@@ -754,161 +690,6 @@ export default function ProjectsUsersView({
       )}
 
       {/* Modal: Create User */}
-      {showUserModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl max-w-xl w-full p-6 shadow-xl border border-slate-200 my-8">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-200">
-              <h3 className="text-lg font-bold text-slate-900">Cadastrar Novo Usuário e Vincular Obras</h3>
-              <button onClick={() => setShowUserModal(false)} className="text-slate-400 hover:text-slate-600">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {error && (
-              <div className="mt-4 p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium">
-                {error}
-              </div>
-            )}
-
-            <form onSubmit={handleCreateUser} className="mt-4 space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Nome Completo *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ex: Eng. Fernanda Martins"
-                  value={userForm.name}
-                  onChange={(e) => setUserForm({ ...userForm, name: e.target.value })}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">E-mail de Acesso *</label>
-                  <input
-                    type="email"
-                    required
-                    placeholder="fernanda@axisobra.com.br"
-                    value={userForm.email}
-                    onChange={(e) => setUserForm({ ...userForm, email: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Perfil de Acesso *</label>
-                  <select
-                    value={userForm.role}
-                    onChange={(e) => setUserForm({ ...userForm, role: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
-                  >
-                    <option value="ENGENHEIRO">Engenheiro (Vê Obras Vinculadas)</option>
-                    <option value="ENCARREGADO">Mestre / Encarregado (Vê Obras Vinculadas)</option>
-                    <option value="FISCAL">Fiscal / Cliente (Vê Obras Vinculadas)</option>
-                    <option value="ADMIN">Administrador Geral (Vê Todas as Obras)</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Registro CREA / CFT</label>
-                  <input
-                    type="text"
-                    placeholder="CREA-SP 506000000"
-                    value={userForm.crea_cft}
-                    onChange={(e) => setUserForm({ ...userForm, crea_cft: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Telefone</label>
-                  <input
-                    type="text"
-                    placeholder="(11) 99999-0000"
-                    value={userForm.phone}
-                    onChange={(e) => setUserForm({ ...userForm, phone: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
-                  />
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Senha inicial (opcional)</label>
-                  <input
-                    type="password"
-                    minLength={6}
-                    autoComplete="new-password"
-                    placeholder="Mínimo 6 caracteres"
-                    value={userForm.password}
-                    onChange={(e) => setUserForm({ ...userForm, password: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
-                  />
-                  <p className="text-[11px] text-slate-500 mt-1">
-                    Se ficar em branco, o usuário entra com código por e-mail ou cria a senha em "Esqueci minha senha".
-                  </p>
-                </div>
-              </div>
-
-              {userForm.role !== 'ADMIN' && (
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                    Selecione as Obras que este Usuário poderá gerenciar:
-                  </label>
-                  <div className="space-y-1.5 max-h-40 overflow-y-auto p-2 rounded-lg border border-slate-200 bg-slate-50">
-                    {projects.map((p) => {
-                      const checked = userForm.projectIds.includes(p.id);
-                      return (
-                        <label
-                          key={p.id}
-                          className="flex items-center gap-2.5 p-1.5 rounded hover:bg-white cursor-pointer text-xs"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => {
-                              const next = checked
-                                ? userForm.projectIds.filter((id) => id !== p.id)
-                                : [...userForm.projectIds, p.id];
-                              setUserForm({ ...userForm, projectIds: next });
-                            }}
-                            className="rounded text-amber-500 focus:ring-amber-500"
-                          />
-                          <span className="font-mono font-bold text-slate-700">{p.code}</span>
-                          <span className="font-medium text-slate-900">{p.name}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-200">
-                <button
-                  type="button"
-                  onClick={() => setShowUserModal(false)}
-                  className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 text-sm font-medium hover:bg-slate-50"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-semibold text-sm shadow-sm"
-                >
-                  Criar Usuário e Vincular
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {editingUser && (
-        <EditUserModal
-          user={editingUser}
-          isSelf={editingUser.id === currentUser?.id}
-          onClose={() => setEditingUser(null)}
-          onSaved={() => loadData()}
-        />
-      )}
     </div>
   );
 }

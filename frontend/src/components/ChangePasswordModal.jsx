@@ -5,7 +5,7 @@ import { apiRequest } from '../api';
 const inputClass =
   'w-full px-3 py-2 rounded-lg border border-slate-300 text-sm text-slate-900 focus:ring-2 focus:ring-amber-500 outline-none';
 
-export default function ChangePasswordModal({ onClose }) {
+export default function ChangePasswordModal({ onClose, onChanged, forced = false }) {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -27,6 +27,7 @@ export default function ChangePasswordModal({ onClose }) {
         body: JSON.stringify({ currentPassword, newPassword })
       });
       setDone(true);
+      if (onChanged) onChanged();
     } catch (err) {
       setError(err.message);
     } finally {
@@ -36,16 +37,23 @@ export default function ChangePasswordModal({ onClose }) {
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-slate-950/70" onClick={onClose} />
+      <div className="absolute inset-0 bg-slate-950/70" onClick={forced ? undefined : onClose} />
       <div className="relative w-full max-w-sm bg-white rounded-2xl shadow-2xl p-5">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-bold text-slate-900 flex items-center gap-2">
             <KeyRound className="w-4 h-4 text-amber-600" /> Alterar minha senha
           </h3>
-          <button onClick={onClose} className="p-1 rounded text-slate-400 hover:text-slate-700" aria-label="Fechar">
-            <X className="w-5 h-5" />
-          </button>
+          {!forced && (
+            <button onClick={onClose} className="p-1 rounded text-slate-400 hover:text-slate-700" aria-label="Fechar">
+              <X className="w-5 h-5" />
+            </button>
+          )}
         </div>
+        {forced && !done && (
+          <p className="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg p-2.5 mb-3">
+            Sua senha foi definida por outra pessoa. Por segurança, crie uma nova senha para continuar.
+          </p>
+        )}
 
         {done ? (
           <div className="space-y-4">

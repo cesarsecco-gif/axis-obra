@@ -34,27 +34,44 @@ const PURPOSE_TEXT = {
   RESET: {
     subject: 'Recuperação de senha do AXIS OBRA',
     intro: 'Use o código abaixo para criar uma nova senha no AXIS OBRA.'
+  },
+  INVITE: {
+    subject: 'Convite para acessar o AXIS OBRA',
+    intro: 'Você recebeu acesso ao AXIS OBRA. Clique no botão abaixo (ou use o código na opção "Esqueci minha senha") para criar a sua senha.'
   }
 };
 
-async function sendAuthCode({ to, name, code, purpose, minutes }) {
+const escapeHtml = (v) => String(v || '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' })[c]);
+
+function validityText(minutes) {
+  if (minutes >= 24 * 60) {
+    const days = Math.round(minutes / (24 * 60));
+    return `${days} dia${days > 1 ? 's' : ''}`;
+  }
+  return `${minutes} minutos`;
+}
+
+async function sendAuthCode({ to, name, code, purpose, minutes, link, invitedBy }) {
   const texts = PURPOSE_TEXT[purpose] || PURPOSE_TEXT.LOGIN;
+  const validity = validityText(minutes);
 
   if (!emailConfigured) {
     if (isProduction) throw new Error('Envio de e-mail não configurado no servidor.');
-    console.log(`[AXIS OBRA][DEV] Código ${purpose} para ${to}: ${code} (válido por ${minutes} min)`);
+    console.log(`[AXIS OBRA][DEV] Código ${purpose} para ${to}: ${code} (válido por ${validity})${link ? ` — ${link}` : ''}`);
     return;
   }
 
-  const text = `Olá${name ? `, ${name}` : ''}!\n\n${texts.intro}\n\nCódigo: ${code}\n\nO código vale por ${minutes} minutos e só pode ser usado uma vez. Se você não pediu este código, ignore este e-mail.\n\nAXIS OBRA`;
+  const intro = invitedBy ? `${invitedBy} cadastrou você no AXIS OBRA. ${texts.intro}` : texts.intro;
+  const text = `Olá${name ? `, ${name}` : ''}!\n\n${intro}\n\n${link ? `Criar senha: ${link}\n\n` : ''}Código: ${code}\n\nO código vale por ${validity} e só pode ser usado uma vez. Se você não esperava este e-mail, ignore-o.\n\nAXIS OBRA`;
   const html = `
     <div style="font-family:Arial,Helvetica,sans-serif;max-width:480px;margin:0 auto;color:#0f172a">
       <div style="background:#0f172a;color:#f59e0b;padding:16px 20px;font-weight:900;font-size:18px;border-radius:8px 8px 0 0">AXIS OBRA</div>
       <div style="border:1px solid #e2e8f0;border-top:0;padding:20px;border-radius:0 0 8px 8px">
-        <p>Olá${name ? `, <b>${String(name).replace(/[<>&]/g, '')}</b>` : ''}!</p>
-        <p>${texts.intro}</p>
+        <p>Olá${name ? `, <b>${escapeHtml(name)}</b>` : ''}!</p>
+        <p>${escapeHtml(intro)}</p>
+        ${link ? `<p style="text-align:center;margin:20px 0"><a href="${escapeHtml(link)}" style="background:#f59e0b;color:#0f172a;font-weight:700;text-decoration:none;padding:12px 22px;border-radius:8px;display:inline-block">Criar minha senha</a></p>` : ''}
         <p style="font-size:32px;font-weight:900;letter-spacing:8px;text-align:center;background:#fef3c7;border-radius:8px;padding:12px 0">${code}</p>
-        <p style="font-size:13px;color:#475569">O código vale por ${minutes} minutos e só pode ser usado uma vez. Se você não pediu este código, ignore este e-mail.</p>
+        <p style="font-size:13px;color:#475569">O código vale por ${validity} e só pode ser usado uma vez. Se você não esperava este e-mail, ignore-o.</p>
       </div>
     </div>`;
 
