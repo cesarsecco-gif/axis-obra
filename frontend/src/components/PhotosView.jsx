@@ -30,16 +30,32 @@ import {
 import { apiRequest, formatDateBR } from '../api';
 import PhotoReportModal from './PhotoReportModal';
 
-const STAGES = [
-  { value: 'TERRAPLANAGEM', label: 'Terraplanagem', color: 'bg-amber-100 text-amber-800 border-amber-300' },
-  { value: 'FUNDACAO', label: 'Fundação', color: 'bg-sky-100 text-sky-800 border-sky-300' },
-  { value: 'ESTRUTURA', label: 'Estrutura / Concreto', color: 'bg-indigo-100 text-indigo-800 border-indigo-300' },
-  { value: 'ALVENARIA', label: 'Alvenaria / Vedação', color: 'bg-orange-100 text-orange-800 border-orange-300' },
-  { value: 'INSTALACOES', label: 'Instalações (Elét/Hidr)', color: 'bg-cyan-100 text-cyan-800 border-cyan-300' },
-  { value: 'COBERTURA', label: 'Cobertura', color: 'bg-purple-100 text-purple-800 border-purple-300' },
-  { value: 'ACABAMENTO', label: 'Acabamento / Revestimento', color: 'bg-emerald-100 text-emerald-800 border-emerald-300' },
-  { value: 'SEGURANCA', label: 'Segurança do Trabalho (NR-18)', color: 'bg-rose-100 text-rose-800 border-rose-300' },
-  { value: 'VISTORIA', label: 'Vistoria Geral', color: 'bg-slate-100 text-slate-800 border-slate-300' }
+// Classes completas (literais) para o Tailwind gerar o CSS das cores configuráveis.
+const STAGE_COLOR_CLASSES = {
+  slate: 'bg-slate-100 text-slate-800 border-slate-300',
+  amber: 'bg-amber-100 text-amber-800 border-amber-300',
+  orange: 'bg-orange-100 text-orange-800 border-orange-300',
+  rose: 'bg-rose-100 text-rose-800 border-rose-300',
+  emerald: 'bg-emerald-100 text-emerald-800 border-emerald-300',
+  sky: 'bg-sky-100 text-sky-800 border-sky-300',
+  blue: 'bg-blue-100 text-blue-800 border-blue-300',
+  indigo: 'bg-indigo-100 text-indigo-800 border-indigo-300',
+  purple: 'bg-purple-100 text-purple-800 border-purple-300',
+  cyan: 'bg-cyan-100 text-cyan-800 border-cyan-300'
+};
+
+// Opções padrão, usadas apenas enquanto a configuração (Configurações Gerais > Etapa Construtiva)
+// não carrega ou se ela estiver vazia.
+const DEFAULT_STAGES = [
+  { value: 'TERRAPLANAGEM', label: 'Terraplanagem', color: STAGE_COLOR_CLASSES.amber },
+  { value: 'FUNDACAO', label: 'Fundação', color: STAGE_COLOR_CLASSES.sky },
+  { value: 'ESTRUTURA', label: 'Estrutura / Concreto', color: STAGE_COLOR_CLASSES.indigo },
+  { value: 'ALVENARIA', label: 'Alvenaria / Vedação', color: STAGE_COLOR_CLASSES.orange },
+  { value: 'INSTALACOES', label: 'Instalações (Elét/Hidr)', color: STAGE_COLOR_CLASSES.sky },
+  { value: 'COBERTURA', label: 'Cobertura', color: STAGE_COLOR_CLASSES.purple },
+  { value: 'ACABAMENTO', label: 'Acabamento / Revestimento', color: STAGE_COLOR_CLASSES.emerald },
+  { value: 'SEGURANCA', label: 'Segurança do Trabalho (NR-18)', color: STAGE_COLOR_CLASSES.rose },
+  { value: 'VISTORIA', label: 'Vistoria Geral', color: STAGE_COLOR_CLASSES.slate }
 ];
 
 const WEATHER_LABELS = {
@@ -94,21 +110,54 @@ export default function PhotosView({ projects, selectedProjectId, onRefreshDashb
   const [submitProgress, setSubmitProgress] = useState('');
   const [error, setError] = useState('');
 
+  // Etapas Construtivas configuráveis (Configurações Gerais > Campos Personalizáveis)
+  const [STAGES, setStages] = useState(DEFAULT_STAGES);
+  const defaultStageCode = STAGES.some((st) => st.value === 'ESTRUTURA')
+    ? 'ESTRUTURA'
+    : STAGES[0]?.value || 'ESTRUTURA';
+
   // Common batch defaults (for New Photo Batch) & single Edit form
   const initialCommonForm = {
     project_id: selectedProjectId !== 'ALL' ? selectedProjectId : (projects[0]?.id || ''),
     taken_at: new Date().toISOString().slice(0, 10),
     weather_condition: 'SOL',
-    default_stage: 'ESTRUTURA',
+    default_stage: defaultStageCode,
     default_location_area: '',
     // Used when editing a single existing photo:
     title: '',
     description: '',
-    stage: 'ESTRUTURA',
+    stage: defaultStageCode,
     location_area: ''
   };
 
   const [form, setForm] = useState(initialCommonForm);
+
+
+  useEffect(() => {
+    let cancelled = false;
+    apiRequest('/api/occurrence-params?group=PHOTO_STAGE')
+      .then((rows) => {
+        if (cancelled || !Array.isArray(rows) || rows.length === 0) return;
+        const loaded = rows.map((r) => ({
+          value: r.code,
+          label: r.label,
+          color: STAGE_COLOR_CLASSES[r.color] || STAGE_COLOR_CLASSES.slate
+        }));
+        setStages(loaded);
+        // Se a etapa padrão do formulário foi removida da configuração, usa a primeira disponível.
+        setForm((prev) => {
+          const codes = loaded.map((st) => st.value);
+          const next = { ...prev };
+          if (!codes.includes(prev.default_stage)) next.default_stage = codes[0];
+          if (!codes.includes(prev.stage)) next.stage = codes[0];
+          return next;
+        });
+      })
+      .catch((err) => console.error('Erro ao carregar etapas construtivas:', err));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Queue of photos when creating (supports 1 or many photos in the same batch)
   // Each item: { id, file, base64, previewUrl, title, stage, location_area, description }
@@ -172,7 +221,7 @@ export default function PhotosView({ projects, selectedProjectId, onRefreshDashb
       project_id: photo.project_id,
       title: photo.title || '',
       description: photo.description || '',
-      stage: photo.stage || 'ESTRUTURA',
+      stage: photo.stage || defaultStageCode,
       location_area: photo.location_area || '',
       taken_at: String(photo.taken_at || '').slice(0, 10),
       weather_condition: photo.weather_condition || 'SOL'
@@ -202,7 +251,7 @@ export default function PhotosView({ projects, selectedProjectId, onRefreshDashb
             base64: '',
             previewUrl: reader.result,
             title: autoTitle,
-            stage: form.default_stage || 'ESTRUTURA',
+            stage: form.default_stage || defaultStageCode,
             location_area: form.default_location_area || '',
             description: ''
           }
@@ -299,7 +348,7 @@ export default function PhotosView({ projects, selectedProjectId, onRefreshDashb
         base64: b64,
         previewUrl: b64,
         title: defaultTitle,
-        stage: form.default_stage || 'ESTRUTURA',
+        stage: form.default_stage || defaultStageCode,
         location_area: form.default_location_area || '',
         description: ''
       }
@@ -401,7 +450,7 @@ export default function PhotosView({ projects, selectedProjectId, onRefreshDashb
           fd.append('project_id', form.project_id);
           fd.append('title', item.title.trim());
           fd.append('description', item.description || '');
-          fd.append('stage', item.stage || form.default_stage || 'ESTRUTURA');
+          fd.append('stage', item.stage || form.default_stage || defaultStageCode);
           fd.append('location_area', item.location_area || '');
           fd.append('taken_at', form.taken_at);
           fd.append('weather_condition', form.weather_condition);
@@ -426,7 +475,7 @@ export default function PhotosView({ projects, selectedProjectId, onRefreshDashb
               project_id: form.project_id,
               title: item.title.trim(),
               description: item.description || '',
-              stage: item.stage || form.default_stage || 'ESTRUTURA',
+              stage: item.stage || form.default_stage || defaultStageCode,
               location_area: item.location_area || '',
               taken_at: form.taken_at,
               weather_condition: form.weather_condition,
@@ -989,6 +1038,9 @@ export default function PhotosView({ projects, selectedProjectId, onRefreshDashb
                         onChange={(e) => setForm({ ...form, stage: e.target.value })}
                         className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
                       >
+                        {form.stage && !STAGES.some((st) => st.value === form.stage) && (
+                          <option value={form.stage}>{form.stage} (etapa removida)</option>
+                        )}
                         {STAGES.map((s) => (
                           <option key={s.value} value={s.value}>
                             {s.label}

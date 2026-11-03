@@ -32,7 +32,8 @@ const PARAM_GROUPS = [
   { key: 'TYPE', label: '1. Categoria / Tipo de Ocorrência' },
   { key: 'SEVERITY', label: '2. Grau de Severidade' },
   { key: 'STATUS', label: '3. Status da Ocorrência' },
-  { key: 'SECTOR', label: '4. Setor / Frente de Serviço' }
+  { key: 'SECTOR', label: '4. Setor / Frente de Serviço' },
+  { key: 'PHOTO_STAGE', label: '5. Etapa Construtiva' }
 ];
 
 export default function SettingsView({ projects, selectedProjectId, currentUser }) {
@@ -864,8 +865,11 @@ export default function SettingsView({ projects, selectedProjectId, currentUser 
                 className="px-3 py-2 rounded-lg border border-slate-300 text-xs bg-white font-medium"
               >
                 <option value="blue">Azul</option>
+                <option value="sky">Azul Claro</option>
+                <option value="indigo">Índigo</option>
                 <option value="emerald">Verde</option>
-                <option value="amber">Amarelo / Laranja</option>
+                <option value="amber">Amarelo / Âmbar</option>
+                <option value="orange">Laranja</option>
                 <option value="rose">Vermelho / Rosa</option>
                 <option value="purple">Roxo</option>
                 <option value="slate">Cinza</option>
