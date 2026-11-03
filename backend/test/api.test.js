@@ -329,6 +329,32 @@ test('restaurar campos padrão de ocorrência (rota que faltava)', async () => {
   assert.equal((await api('/api/occurrence-params/reset', { method: 'POST', token: enc })).status, 403);
 });
 
+test('etapas construtivas configuráveis: padrão semeado, criar, editar e excluir', async () => {
+  const admin = await login('cesarsecco@gmail.com');
+  const list = await api('/api/occurrence-params?group=PHOTO_STAGE', { token: admin });
+  assert.equal(list.status, 200);
+  assert.ok(list.data.some((p) => p.code === 'ESTRUTURA' && p.label === 'Estrutura / Concreto'));
+
+  const created = await api('/api/occurrence-params', {
+    method: 'POST',
+    token: admin,
+    body: { group_key: 'PHOTO_STAGE', label: 'Pavimentação Asfáltica', color: 'slate' }
+  });
+  assert.equal(created.status, 201);
+  assert.equal(created.data.code, 'PAVIMENTACAO_ASFALTICA');
+
+  const edited = await api(`/api/occurrence-params/${created.data.id}`, {
+    method: 'PUT',
+    token: admin,
+    body: { label: 'Pavimentação / CBUQ', color: 'amber' }
+  });
+  assert.equal(edited.status, 200);
+  assert.equal(edited.data.code, 'PAVIMENTACAO_ASFALTICA'); // código estável para fotos já cadastradas
+
+  const del = await api(`/api/occurrence-params/${created.data.id}`, { method: 'DELETE', token: admin });
+  assert.equal(del.status, 200);
+});
+
 test('backup do banco disponível somente para ADMIN', async () => {
   const admin = await login('cesarsecco@gmail.com');
   const res = await fetch(`${BASE}/api/admin/backup`, { headers: { Authorization: `Bearer ${admin}` } });

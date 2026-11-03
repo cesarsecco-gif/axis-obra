@@ -323,6 +323,7 @@ function initDatabase() {
   migrateRdoStatus();
   ensureRdoFolioIndex();
   seedOccurrenceParamsIfEmpty();
+  seedPhotoStagesIfEmpty();
   seedReportSettingsIfEmpty();
   const freshDatabase = seedIfEmpty();
   // Dados extras de demonstração só são criados em banco novo — nunca alteram dados reais de produção.
@@ -770,6 +771,32 @@ function seedOccurrenceParamsIfEmpty() {
   });
 }
 
+// Etapas Construtivas (usadas no Registro Fotográfico). Semeadas à parte para que bancos já
+// existentes (que já têm os demais grupos) também recebam as opções padrão.
+function seedPhotoStagesIfEmpty() {
+  const countRow = db
+    .prepare("SELECT COUNT(*) as total FROM occurrence_params WHERE group_key = 'PHOTO_STAGE'")
+    .get();
+  if (countRow && countRow.total > 0) return;
+
+  const insertParam = db.prepare(`
+    INSERT INTO occurrence_params (group_key, code, label, color, is_resolved, is_critical, sort_order)
+    VALUES ('PHOTO_STAGE', ?, ?, ?, 0, 0, ?)
+  `);
+
+  [
+    ['TERRAPLANAGEM', 'Terraplanagem', 'amber', 1],
+    ['FUNDACAO', 'Fundação', 'sky', 2],
+    ['ESTRUTURA', 'Estrutura / Concreto', 'indigo', 3],
+    ['ALVENARIA', 'Alvenaria / Vedação', 'orange', 4],
+    ['INSTALACOES', 'Instalações (Elét/Hidr)', 'sky', 5],
+    ['COBERTURA', 'Cobertura', 'purple', 6],
+    ['ACABAMENTO', 'Acabamento / Revestimento', 'emerald', 7],
+    ['SEGURANCA', 'Segurança do Trabalho (NR-18)', 'rose', 8],
+    ['VISTORIA', 'Vistoria Geral', 'slate', 9]
+  ].forEach((row) => insertParam.run(...row));
+}
+
 function seedReportSettingsIfEmpty() {
   const row = db.prepare('SELECT id FROM report_settings WHERE id = 1').get();
   if (row) return;
@@ -1097,6 +1124,7 @@ module.exports = {
   verifyPassword,
   isLegacyHash,
   seedOccurrenceParamsIfEmpty,
+  seedPhotoStagesIfEmpty,
   dataDir,
   uploadsDir
 };

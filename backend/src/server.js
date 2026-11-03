@@ -11,6 +11,7 @@ const {
   verifyPassword,
   isLegacyHash,
   seedOccurrenceParamsIfEmpty,
+  seedPhotoStagesIfEmpty,
   dataDir,
   uploadsDir
 } = require('./db');
@@ -1874,7 +1875,7 @@ app.post('/api/occurrence-params', authenticate, (req, res) => {
     return res.status(400).json({ error: 'Grupo e nome da opção são obrigatórios.' });
   }
 
-  const validGroups = ['TYPE', 'SEVERITY', 'STATUS', 'SECTOR'];
+  const validGroups = ['TYPE', 'SEVERITY', 'STATUS', 'SECTOR', 'PHOTO_STAGE'];
   const normalizedGroup = String(group_key).toUpperCase();
   if (!validGroups.includes(normalizedGroup)) {
     return res.status(400).json({ error: 'Grupo inválido.' });
@@ -1970,6 +1971,7 @@ app.delete('/api/occurrence-params/:id', authenticate, (req, res) => {
 app.post('/api/occurrence-params/reset', authenticate, (_req, res) => {
   db.exec('DELETE FROM occurrence_params;');
   seedOccurrenceParamsIfEmpty();
+  seedPhotoStagesIfEmpty();
   res.json(db.prepare('SELECT * FROM occurrence_params ORDER BY group_key ASC, sort_order ASC, id ASC').all());
 });
 
