@@ -1295,6 +1295,7 @@ app.post('/api/employees', authenticate, (req, res) => {
       );
 
     const created = db.prepare('SELECT * FROM employees WHERE id = ?').get(Number(info.lastInsertRowid));
+    syncRdoWorkForce([created.project_id]);
     res.status(201).json(created);
   } catch (err) {
     res.status(400).json({ error: err.message.includes('UNIQUE') ? 'CPF já cadastrado no sistema.' : err.message });
@@ -1358,6 +1359,7 @@ app.put('/api/employees/:id', authenticate, (req, res) => {
     );
 
     const updated = db.prepare('SELECT * FROM employees WHERE id = ?').get(empId);
+    syncRdoWorkForce([existing.project_id, updated.project_id]);
     res.json(updated);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -1374,6 +1376,7 @@ app.delete('/api/employees/:id', authenticate, (req, res) => {
   }
 
   db.prepare('DELETE FROM employees WHERE id = ?').run(empId);
+  syncRdoWorkForce([existing.project_id]);
   res.json({ success: true });
 });
 
@@ -2338,11 +2341,21 @@ const countActiveEmployees = (projectId, date) =>
     `)
     .get(projectId, date, date).c;
 
-// Folhas em rascunho mostram sempre o efetivo atualizado; folhas finalizadas mantêm o valor registrado.
+// O efetivo do RDO é dinâmico: toda leitura usa o quadro atual do Módulo 4 (rascunhos e finalizadas).
 const withLiveWorkForce = (rdo) =>
-  rdo && rdo.status !== 'final'
-    ? { ...rdo, work_force_count: countActiveEmployees(rdo.project_id, rdo.rdo_date) }
-    : rdo;
+  rdo ? { ...rdo, work_force_count: countActiveEmployees(rdo.project_id, rdo.rdo_date) } : rdo;
+
+// Regrava o efetivo de todas as folhas das obras afetadas sempre que o quadro de funcionários muda,
+// para que exportações, backups e qualquer leitura direta do banco também fiquem atualizados.
+function syncRdoWorkForce(projectIds) {
+  const ids = [...new Set(projectIds.filter(Boolean).map(Number))];
+  if (ids.length === 0) return;
+  const update = db.prepare('UPDATE rdo_records SET work_force_count = ? WHERE id = ?');
+  for (const pid of ids) {
+    const rows = db.prepare('SELECT id, rdo_date FROM rdo_records WHERE project_id = ?').all(pid);
+    for (const r of rows) update.run(countActiveEmployees(pid, r.rdo_date), r.id);
+  }
+}
 
 app.get('/api/rdo', authenticate, (req, res) => {
   const { projectId, month, year, date, fromDate, toDate, order = 'ASC' } = req.query;
@@ -2512,14 +2525,16 @@ const logRdoHistory = (rdoId, user, action, note) => {
   );
 };
 const getRdoFull = (pid, rdoDate) =>
-  db
-    .prepare(`
-      SELECT r.*, p.name as project_name, p.code as project_code
-      FROM rdo_records r
-      JOIN projects p ON p.id = r.project_id
-      WHERE r.project_id = ? AND r.rdo_date = ?
-    `)
-    .get(pid, rdoDate);
+  withLiveWorkForce(
+    db
+      .prepare(`
+        SELECT r.*, p.name as project_name, p.code as project_code
+        FROM rdo_records r
+        JOIN projects p ON p.id = r.project_id
+        WHERE r.project_id = ? AND r.rdo_date = ?
+      `)
+      .get(pid, rdoDate)
+  );
 
 app.post('/api/rdo', authenticate, (req, res) => {
   const {
