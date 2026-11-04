@@ -276,6 +276,31 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
     }
   }, [targetProjectId, currentDate, loadRdoForDate]);
 
+  // Efetivo dinâmico: ao voltar para a tela (outra aba/janela), atualiza só o número de profissionais
+  // com o quadro atual do Módulo 4, sem descartar o que está sendo digitado na folha.
+  useEffect(() => {
+    if (!targetProjectId || !currentDate) return undefined;
+    const refreshWorkForce = async () => {
+      if (document.visibilityState === 'hidden') return;
+      try {
+        const data = await apiRequest(`/api/rdo/by-date?projectId=${targetProjectId}&date=${currentDate}`);
+        setRdoData((prev) =>
+          prev.rdo_date === currentDate && prev.work_force_count !== data.work_force_count
+            ? { ...prev, work_force_count: data.work_force_count }
+            : prev
+        );
+      } catch {
+        // silencioso: a próxima carga da folha corrige
+      }
+    };
+    window.addEventListener('focus', refreshWorkForce);
+    document.addEventListener('visibilitychange', refreshWorkForce);
+    return () => {
+      window.removeEventListener('focus', refreshWorkForce);
+      document.removeEventListener('visibilitychange', refreshWorkForce);
+    };
+  }, [targetProjectId, currentDate]);
+
   // Handle Quick Year / Month Filter Changes
   const handleYearFilterChange = (yr) => {
     setSelectedYear(yr);
@@ -2343,11 +2368,9 @@ export default function RdoView({ projects, selectedProjectId, currentUser }) {
                     className="w-24 px-2 py-1 sm:py-0.5 border border-slate-900 font-bold text-center text-xs bg-slate-100 cursor-not-allowed disabled:text-slate-900"
                   />
                 </div>
-                {!isLocked && (
-                  <p className="text-[10px] text-slate-500 leading-tight -mt-1">
-                    Automático: profissionais da obra com início até esta data e sem data de fim (ou fim a partir desta data), conforme o Módulo 4.
-                  </p>
-                )}
+                <p className="text-[10px] text-slate-500 leading-tight -mt-1 print:hidden">
+                  Automático e sempre atualizado: profissionais da obra com início até esta data e sem data de fim (ou fim a partir desta data), conforme o Módulo 4.
+                </p>
 
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 sm:gap-2">
                   <span className="font-bold text-[11px] text-slate-700">ENGENHEIRO PREPOSTO:</span>
